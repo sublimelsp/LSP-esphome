@@ -1,0 +1,79 @@
+{
+  "contributions": {
+    "settings": [
+      {
+        "file_patterns": [
+          "/LSP-esphome.sublime-settings"
+        ],
+        "schema": {
+          "$id": "sublime://settings/LSP-esphome",
+          "definitions": {
+            "PluginConfig": {
+              "properties": {
+                "initializationOptions": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "pythonPath": {
+                      "type": "string",
+                      "default": "${managed_python_path}",
+                      "markdownDescription": "Path to the python interpreter that has `esphome` package installed. By default (when set to `${managed_python_path}`) uses Python and ESPHome instance managed by this package. Override to `python3` or `py` or absolute path to use Python from the system or a virtual environment. In that case make sure that given python environment has `esphome` installed.",
+                    },
+                  },
+                },
+                "settings": {
+                  "properties": {
+                    "esphome.validator": {
+                      "enum": [
+                        "local",
+                        "dashboard"
+                      ],
+                      "default": "local",
+                      "markdownEnumDescriptions": [
+                        "Use a **local installation of ESPHome**. By default uses Python environment managed by this package. If you can run esphome in your terminal or have installed esphome in a virtual environment, then you can override `pythonPath` in `initializationOptions` to point at it. In that case it needs point at python executable inside your venv folder or, if Python is in the PATH, the executable name.",
+                        "Use the **ESPHome Device Builder**, this can be the ESPHome running in Home Assistant, in that case you will need to configure the add-on to `leave_front_door_open` and also give a TCP port in the addon for external access (in case you are only accessing via Ingress)."
+                      ]
+                    },
+                    "esphome.dashboardUri": {
+                      "type": "string",
+                      "default": "homeassistant.local:6052",
+                      "description": "Specifies the dashboard uri location, e.g. http://homeassistant:6052/."
+                    },
+                  },
+                  "additionalProperties": false
+                },
+              },
+            },
+          },
+          "allOf": [
+            {
+              "$ref": "sublime://settings/LSP-plugin-base"
+            },
+            {
+              "$ref": "sublime://settings/LSP-esphome#/definitions/PluginConfig"
+            }
+          ],
+        }
+      },
+      {
+        "file_patterns": [
+          "/*.sublime-project"
+        ],
+        "schema": {
+          "properties": {
+            "settings": {
+              "properties": {
+                "LSP": {
+                  "properties": {
+                    "LSP-esphome": {
+                      "$ref": "sublime://settings/LSP-esphome#/definitions/PluginConfig"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+    ]
+  }
+}
