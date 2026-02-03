@@ -1,0 +1,16 @@
+{
+	"initializationOptions": {
+		// Path to the python interpreter that has `esphome` package installed. By default (when set to
+		// `${managed_python_path}`) uses Python and ESPHome instance managed by this package. Override to `python3` or
+		// `py` or absolute path to use Python from the system or a virtual environment. In that case make sure that
+		// given python environment has `esphome` installed.
+		"pythonPath": "${managed_python_path}"
+	},
+	"settings": {
+		"esphome.validator": "local",
+		"esphome.dashboardUri": "homeassistant.local:6052"
+	},
+	// Open "Preferences: LSP Utils Settings" from the Command Palette to customize the Node runtime.
+	"command": ["${node_bin}", "${server_path}", "--stdio"],
+	"selector": "source.yaml.esphome"
+}

@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+GITHUB_REPO_URL="https://github.com/esphome/esphome-vscode"
+GITHUB_REPO_NAME=$(echo "${GITHUB_REPO_URL}" | command grep -oE '[^/]*$')
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_DIR="${SCRIPT_DIR}"
+CLONED_REPO_DIR="${REPO_DIR}/temp"
+SRC_SERVER_DIR="${CLONED_REPO_DIR}/server/"
+
+echo "Your node version: $(node --version || echo '<missing>')"
+read -rp "You need at least version 22 of Node. Exit the script if it doesn't match requirements. Otherwise press enter."
+
+# -------- #
+# clean up #
+# -------- #
+
+pushd "${REPO_DIR}" || exit
+
+rm -rf out package-lock.json package.json update-info.log
+
+popd || exit
+
+
+# ---------------- #
+# clone repo       #
+# ---------------- #
+
+pushd "${REPO_DIR}" || exit
+
+echo 'Enter commit SHA, branch or tag (for example 2.1.0) to build'
+read -rp 'SHA, branch or tag (default: main): ' ref
+
+if [ "${ref}" = "" ]; then
+    ref="main"
+fi
+
+echo "Cloning ${GITHUB_REPO_URL}"
+git clone ${GITHUB_REPO_URL} --branch ${ref} --single-branch "${CLONED_REPO_DIR}" || echo "Repo already cloned. Continuing..."
+current_sha=$( git rev-parse HEAD )
+printf "ref: %s\n%s\n" "$ref" "$current_sha" > update-info.log
+
+popd || exit
+
+# ------------ #
+# prepare deps #
+# ------------ #
+
+pushd "${CLONED_REPO_DIR}" || exit
+
+echo 'Installing dependencies...'
+npm i
+
+popd || exit
+
+# ------- #
+# compile #
+# ------- #
+
+pushd "${CLONED_REPO_DIR}" || exit
+
+echo 'Compiling server...'
+npm run compile
+npx webpack --mode none --config ./server/webpack.config.js
+
+popd || exit
+
+# -------------------- #
+# collect output files #
+# -------------------- #
+
+pushd "${SRC_SERVER_DIR}" || exit
+
+echo 'Copying and cleaning up files...'
+cp -r out package.json "${REPO_DIR}"
+rm -rf "${CLONED_REPO_DIR}"
+
+# ---------------- #
+# Update lock file #
+# ---------------- #
+
+pushd "${REPO_DIR}" || exit
+
+echo 'Updating the lock file...'
+npm i --omit=dev --lockfile-version=2
+rm -rf node_modules
+
+popd || exit
