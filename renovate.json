@@ -5,5 +5,17 @@
   ],
   "npm": {
     "enabled": false
-  }
+  },
+  "packageRules": [
+    {
+      "matchManagers": [
+        "pep621"
+      ],
+      "matchPackageNames": [
+        "esphome"
+      ],
+      "separateMajorMinor": false,
+      "commitMessageExtra": "to v{{{prettyNewVersion}}}"
+    }
+  ]
 }
