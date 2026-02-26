@@ -44,7 +44,7 @@ class LspEsphomePlugin(NpmClientHandler):
         variables = super().get_additional_variables()
         if cls.uv_venv_manager:
             variables.update({
-                'managed_python_path': str(cls.uv_venv_manager.venv_python_path)
+                'managed_python_path': str(cls.uv_venv_manager.venv_bin_path / 'python')
             })
         return variables
 
