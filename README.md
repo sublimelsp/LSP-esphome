@@ -24,7 +24,7 @@ The plugin validates against ESPHome itself, so you will get the same errors. Yo
 
 1. Use the **ESPHome Device Builder**, this can be the ESPHome running in Home Assistant, in that case you will need to configure the add-on to `leave_front_door_open` and also give a TCP port in the addon for external access (in case you are only accessing via Ingress).
 
-2. Use a **local installation of ESPHome**. By default uses Python environment managed by this package. If you can run esphome in your terminal or have installed esphome in a virtual environment, then you can override `pythonPath` in `initializationOptions` to point at it. In that case it needs point at python executable inside your venv folder or, if Python is in the PATH, the executable name.
+2. Use a **local installation of ESPHome**. By default uses Python environment managed by this package. If you can run esphome in your terminal or have installed esphome in a virtual environment, then you can override `pythonPath` in `initialization_options` to point at it. In that case it needs point at python executable inside your venv folder or, if Python is in the PATH, the executable name.
 
 Completion and hover help needs to pull schema from https://schema.esphome.io. The schemas are versioned so the extension will first connect to you Device Builder or local ESPHome to retrieve the version you are using and then try to pull the best available matching version.
 For the dev version it will pull the schemas dev version daily.
