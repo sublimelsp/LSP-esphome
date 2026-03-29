@@ -73,7 +73,7 @@ connection.onInitialize((params) => {
         };
     }
     fileAccessor = new file_accessor_1.VsCodeFileAccessor(documents);
-    pythonPath = (_a = params.initialization_options) === null || _a === void 0 ? void 0 : _a.pythonPath;
+    pythonPath = (_a = params.initializationOptions) === null || _a === void 0 ? void 0 : _a.pythonPath;
     return result;
 });
 connection.onInitialized(() => __awaiter(void 0, void 0, void 0, function* () {
