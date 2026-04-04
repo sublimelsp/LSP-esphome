@@ -1,10 +1,10 @@
 from __future__ import annotations
+
 from lsp_utils import NpmClientHandler
 from lsp_utils import UvVenvManager
 from pathlib import Path
 from typing import final
 from typing_extensions import override
-
 
 PACKAGE_NAME = str(__package__)
 
