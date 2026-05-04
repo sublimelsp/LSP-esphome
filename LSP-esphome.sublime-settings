@@ -1,4 +1,10 @@
 {
+	// The path to the server binary to use for starting the language server.
+	// Use `auto` for the package to manage (install/update) server automatically.
+	// NOTE: Change this instead of directly updating `command` - the `${server_path}` variable is dynamically resolved
+	// based on this setting.
+	// WARNING: Using custom binary could result in package settings not matching what server supports.
+	"server_path": "auto",
 	"initialization_options": {
 		// Path to the python interpreter that has `esphome` package installed. By default (when set to
 		// `${managed_python_path}`) uses Python and ESPHome instance managed by this package. Override to `python3` or

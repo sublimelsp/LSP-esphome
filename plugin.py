@@ -1,57 +1,38 @@
 from __future__ import annotations
 
-from lsp_utils import NpmClientHandler
+from LSP.plugin import LspPlugin
+from LSP.plugin import OnPreStartContext
+from lsp_utils import NodeManager
 from lsp_utils import UvVenvManager
 from pathlib import Path
+from sublime_lib import ResourcePath
 from typing import final
 from typing_extensions import override
 
-PACKAGE_NAME = str(__package__)
-
 
 @final
-class LspEsphomePlugin(NpmClientHandler):
-    package_name = PACKAGE_NAME
-    server_directory = 'language-server'
-    server_binary_path =  str(Path(server_directory, 'out', 'server.js'))
-    uv_venv_manager: UvVenvManager | None = None
+class LspEsphomePlugin(LspPlugin):
 
     @classmethod
     @override
-    def required_node_version(cls) -> str:
-        return '>=22'
-
-    @classmethod
-    @override
-    def needs_update_or_installation(cls) -> bool:
-        needs1 = super().needs_update_or_installation()
-        if not cls.uv_venv_manager:
-            cls.uv_venv_manager = UvVenvManager(PACKAGE_NAME, 'esphome/pyproject.toml', Path(cls.storage_path()))
-        needs2 = cls.uv_venv_manager.needs_install_or_update()
-        return needs1 or needs2
-
-    @classmethod
-    @override
-    def install_or_update(cls) -> None:
-        super().install_or_update()
-        if not cls.uv_venv_manager:
-            raise Exception('Expected UvVenvManager to be initialized')
-        cls.uv_venv_manager.install()
-
-    @classmethod
-    @override
-    def get_additional_variables(cls) -> dict[str, str]:
-        variables = super().get_additional_variables()
-        if cls.uv_venv_manager:
-            variables.update({
-                'managed_python_path': str(cls.uv_venv_manager.venv_bin_path / 'python')
-            })
-        return variables
+    def on_pre_start_async(cls, context: OnPreStartContext) -> None:
+        package_name = cls.plugin_storage_path.name
+        NodeManager.on_pre_start_async(
+            context,
+            cls.plugin_storage_path,
+            ResourcePath('Packages', package_name, 'language-server'),
+            Path('out', 'server.js'),
+            '>=22',
+        )
+        uv_venv = UvVenvManager(cls.plugin_storage_path, ResourcePath('Packages', package_name, 'esphome'), 'python')
+        context.variables.update({
+            'managed_python_path': str(uv_venv.venv_bin_path / 'python')
+        })
 
 
 def plugin_loaded():
-    LspEsphomePlugin.setup()
+    LspEsphomePlugin.register()
 
 
 def plugin_unloaded():
-    LspEsphomePlugin.cleanup()
+    LspEsphomePlugin.unregister()
