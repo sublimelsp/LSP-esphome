@@ -22,7 +22,7 @@ class LspEsphomePlugin(LspPlugin):
             cls.plugin_storage_path,
             ResourcePath('Packages', package_name, 'language-server'),
             Path('out', 'server.js'),
-            '>=22',
+            node_version_requirement='>=22',
         )
         uv_venv = UvVenvManager(cls.plugin_storage_path, ResourcePath('Packages', package_name, 'esphome'), 'python')
         context.variables.update({
