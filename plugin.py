@@ -25,6 +25,9 @@ class LspEsphomePlugin(LspPlugin):
             node_version_requirement='>=22',
         )
         uv_venv = UvVenvManager(cls.plugin_storage_path, ResourcePath('Packages', package_name, 'esphome'), 'python')
+        python_path = context.configuration.init_options.get('pythonPath')
+        if not python_path or '${managed_python_path}' in python_path:
+            uv_venv.install_async()
         context.variables.update({
             'managed_python_path': str(uv_venv.venv_bin_path / 'python')
         })
