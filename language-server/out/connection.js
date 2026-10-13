@@ -16,7 +16,7 @@ class ESPHomeConnection {
         this._isConnected = v;
     }
     handleMessage(msg) {
-        console.log("rcvd " + JSON.stringify(msg).substring(0, 150));
+        console.log("rcvd " + JSON.stringify(msg).substring(0, 550));
         this.handleMessage_(msg);
     }
     onResponse(handleMessage) {

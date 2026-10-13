@@ -21,10 +21,13 @@ const validation_1 = __webpack_require__(82);
 const file_accessor_1 = __webpack_require__(85);
 const connection_source_1 = __webpack_require__(86);
 const hover_handler_1 = __webpack_require__(114);
-const esphome_document_1 = __webpack_require__(299);
-const text_buffer_1 = __webpack_require__(300);
-const completions_handler_1 = __webpack_require__(301);
-const definition_handler_1 = __webpack_require__(302);
+const esphome_document_1 = __webpack_require__(300);
+const text_buffer_1 = __webpack_require__(301);
+const completions_handler_1 = __webpack_require__(302);
+const definition_handler_1 = __webpack_require__(303);
+const document_symbol_handler_1 = __webpack_require__(304);
+const references_handler_1 = __webpack_require__(305);
+const editor_shims_1 = __webpack_require__(187);
 // Create a connection for the server, using Node's IPC as a transport.
 // Also include all preview / proposed LSP features.
 let connection = (0, node_1.createConnection)(node_1.ProposedFeatures.all);
@@ -33,18 +36,16 @@ console.warn = connection.window.showWarningMessage.bind(connection.window);
 console.error = connection.window.showErrorMessage.bind(connection.window);
 // Create a simple text document manager.
 let documents = new node_1.TextDocuments(vscode_languageserver_textdocument_1.TextDocument);
-const esphomeDocuments = new esphome_document_1.ESPHomeDocuments();
+const esphomeDocuments = new esphome_document_1.ESPHomeDocuments(editor_shims_1.coreSchema);
 let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
-const sendDiagnostics = (uri, diagnostics) => {
-    connection.sendDiagnostics({
-        uri,
-        diagnostics,
-    });
-};
 let fileAccessor;
 const esphomeConnection = new connection_source_1.ESPHomeConnectionSource();
 let pythonPath = "";
+let resolveValidation;
+const validationReady = new Promise((resolve) => {
+    resolveValidation = resolve;
+});
 connection.onInitialize((params) => {
     var _a;
     let capabilities = params.capabilities;
@@ -63,6 +64,8 @@ connection.onInitialize((params) => {
                 workDoneProgress: false,
             },
             definitionProvider: true,
+            referencesProvider: true,
+            documentSymbolProvider: true,
         },
     };
     if (hasWorkspaceFolderCapability) {
@@ -74,6 +77,15 @@ connection.onInitialize((params) => {
     }
     fileAccessor = new file_accessor_1.VsCodeFileAccessor(documents);
     pythonPath = (_a = params.initializationOptions) === null || _a === void 0 ? void 0 : _a.pythonPath;
+    esphomeDocuments.setFileLoader((relativePath, baseUri) => __awaiter(void 0, void 0, void 0, function* () {
+        try {
+            const uri = fileAccessor.getRelativePathAsFileUri(baseUri, relativePath);
+            return yield fileAccessor.getFileContents(uri);
+        }
+        catch (_a) {
+            return undefined;
+        }
+    }));
     return result;
 });
 connection.onInitialized(() => __awaiter(void 0, void 0, void 0, function* () {
@@ -86,34 +98,62 @@ connection.onInitialized(() => __awaiter(void 0, void 0, void 0, function* () {
             connection.console.log("Workspace folder change event received.");
         });
     }
-    esphomeConnection.configure(yield getSettings());
-    const validation = new validation_1.Validation(fileAccessor, esphomeConnection, sendDiagnostics);
-    documents.onDidOpen((e) => validation.onDocumentChange(e));
-    documents.onDidChangeContent((e) => validation.onDocumentChange(e));
-    const completionHandler = new completions_handler_1.CompletionsHandler(esphomeDocuments);
-    connection.onCompletion((p) => {
-        const doc = documents.get(p.textDocument.uri);
-        if (!doc)
-            return;
-        esphomeDocuments.update(p.textDocument.uri, new text_buffer_1.TextBuffer(doc));
-        return completionHandler.getCompletions(p.textDocument.uri, p.position);
+    yield esphomeConnection.configure(yield getSettings());
+    const validation = new validation_1.Validation(fileAccessor, esphomeConnection, (uri, diagnostics) => {
+        connection.sendDiagnostics({
+            uri,
+            diagnostics,
+        });
     });
-    const hoverHandler = new hover_handler_1.HoverHandler(esphomeDocuments);
-    connection.onHover((p) => {
-        const doc = documents.get(p.textDocument.uri);
-        if (!doc)
-            return;
-        esphomeDocuments.update(p.textDocument.uri, new text_buffer_1.TextBuffer(doc));
-        return hoverHandler.getHover(p.textDocument.uri, p.position);
-    });
-    const definitionHandler = new definition_handler_1.DefinitionHandler(esphomeDocuments);
-    connection.onDefinition((p) => {
-        const doc = documents.get(p.textDocument.uri);
-        if (!doc)
-            return;
-        esphomeDocuments.update(p.textDocument.uri, new text_buffer_1.TextBuffer(doc));
-        return definitionHandler.getDefinition(p.textDocument.uri, p.position);
-    });
+    resolveValidation(validation);
+}));
+documents.onDidOpen((e) => __awaiter(void 0, void 0, void 0, function* () {
+    const validation = yield validationReady;
+    validation.onDocumentChange(e);
+}));
+documents.onDidChangeContent((e) => __awaiter(void 0, void 0, void 0, function* () {
+    const validation = yield validationReady;
+    validation.onDocumentChange(e);
+}));
+const completionHandler = new completions_handler_1.CompletionsHandler(esphomeDocuments);
+connection.onCompletion((p) => __awaiter(void 0, void 0, void 0, function* () {
+    const doc = documents.get(p.textDocument.uri);
+    if (!doc)
+        return;
+    yield esphomeDocuments.update(p.textDocument.uri, new text_buffer_1.TextBuffer(doc));
+    return completionHandler.getCompletions(p.textDocument.uri, p.position);
+}));
+const hoverHandler = new hover_handler_1.HoverHandler(esphomeDocuments);
+connection.onHover((p) => __awaiter(void 0, void 0, void 0, function* () {
+    const doc = documents.get(p.textDocument.uri);
+    if (!doc)
+        return;
+    yield esphomeDocuments.update(p.textDocument.uri, new text_buffer_1.TextBuffer(doc));
+    return hoverHandler.getHover(p.textDocument.uri, p.position);
+}));
+const definitionHandler = new definition_handler_1.DefinitionHandler(esphomeDocuments);
+connection.onDefinition((p) => __awaiter(void 0, void 0, void 0, function* () {
+    const doc = documents.get(p.textDocument.uri);
+    if (!doc)
+        return;
+    yield esphomeDocuments.update(p.textDocument.uri, new text_buffer_1.TextBuffer(doc));
+    return definitionHandler.getDefinition(p.textDocument.uri, p.position);
+}));
+const referencesHandler = new references_handler_1.ReferencesHandler(esphomeDocuments);
+connection.onReferences((p) => __awaiter(void 0, void 0, void 0, function* () {
+    const doc = documents.get(p.textDocument.uri);
+    if (!doc)
+        return;
+    yield esphomeDocuments.update(p.textDocument.uri, new text_buffer_1.TextBuffer(doc));
+    return referencesHandler.getReferences(p.textDocument.uri, p.position);
+}));
+const documentSymbolHandler = new document_symbol_handler_1.DocumentSymbolHandler(esphomeDocuments);
+connection.onDocumentSymbol((p) => __awaiter(void 0, void 0, void 0, function* () {
+    const doc = documents.get(p.textDocument.uri);
+    if (!doc)
+        return;
+    yield esphomeDocuments.update(p.textDocument.uri, new text_buffer_1.TextBuffer(doc));
+    return documentSymbolHandler.getDocumentSymbols(p.textDocument.uri);
 }));
 function getSettings() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -136,11 +176,7 @@ connection.onDidChangeConfiguration((change) => __awaiter(void 0, void 0, void 0
 }));
 // Only keep settings for open documents, and clear diagnostics.
 documents.onDidClose((e) => {
-    sendDiagnostics(e.document.uri, []);
-});
-connection.onDidChangeWatchedFiles((_change) => {
-    // Monitored files have change in VSCode
-    // connection.console.log('We received an file change event');
+    connection.sendDiagnostics({ uri: e.document.uri, diagnostics: [] });
 });
 // Make the text document manager listen on the connection
 // for open, change and close text document events
@@ -11336,14 +11372,17 @@ class Validation {
         this.diagnosticCollection = new Map();
         this.validating_uri = null;
         this.includedFiles = {};
+        this.noEsphomeKeyWarningUri = null;
         connection.onResponse((m) => this.handleESPHomeMessage(m));
     }
-    addError(uri, range, message) {
-        //console.log(`diag error: ${message} to ${uri}`);
+    addDiagnostic(uri, range, message, severity) {
         let diagnostics = this.diagnosticCollection.get(uri) || [];
-        const diagnostic = vscode_languageserver_protocol_1.Diagnostic.create(range, message);
+        const diagnostic = vscode_languageserver_protocol_1.Diagnostic.create(range, message, severity);
         diagnostics = [...diagnostics, diagnostic];
         this.diagnosticCollection.set(uri, diagnostics);
+    }
+    addError(uri, range, message) {
+        this.addDiagnostic(uri, range, message, vscode_languageserver_protocol_1.DiagnosticSeverity.Error);
     }
     addIncludeFile(file, included) {
         var includes = this.includedFiles[file] || [];
@@ -11353,12 +11392,18 @@ class Validation {
         }
     }
     handleEsphomeError(error) {
+        this.handleEsphomeDiagnostic(error, vscode_languageserver_protocol_1.DiagnosticSeverity.Error);
+    }
+    handleEsphomeWarning(error) {
+        this.handleEsphomeDiagnostic(error, vscode_languageserver_protocol_1.DiagnosticSeverity.Warning);
+    }
+    handleEsphomeDiagnostic(error, severity) {
         const message = error.message;
         if (error.range !== null) {
-            this.addError(this.getUriStringForValidationPath(error.range.document), vscode_languageserver_protocol_1.Range.create(error.range.start_line, error.range.start_col, error.range.end_line, error.range.end_col), message);
+            this.addDiagnostic(this.getUriStringForValidationPath(error.range.document), vscode_languageserver_protocol_1.Range.create(error.range.start_line, error.range.start_col, error.range.end_line, error.range.end_col), message, severity);
         }
         else {
-            this.addError(this.validating_uri, vscode_languageserver_protocol_1.Range.create(1, 0, 1, 2), message);
+            this.addDiagnostic(this.validating_uri, vscode_languageserver_protocol_1.Range.create(1, 0, 1, 2), message, severity);
         }
     }
     handleYamlError(error) {
@@ -11408,6 +11453,7 @@ class Validation {
     }
     handleESPHomeMessage(msg) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
             try {
                 switch (msg.type) {
                     case types_1.MESSAGE_READ_FILE: {
@@ -11451,6 +11497,7 @@ class Validation {
                     case types_1.MESSAGE_RESULT: {
                         msg.validation_errors.forEach((e) => this.handleEsphomeError(e));
                         msg.yaml_errors.forEach((e) => this.handleYamlError(e));
+                        (_a = msg.validation_warnings) === null || _a === void 0 ? void 0 : _a.forEach((e) => this.handleEsphomeWarning(e));
                         this.diagnosticCollection.forEach((diagnostics, uri) => this.sendDiagnostics(uri, diagnostics));
                         this.validating_uri = null;
                         //this.validateNext();
@@ -11487,44 +11534,84 @@ class Validation {
         });
     }
     onDocumentChange(e) {
-        try {
-            if (vscodeUri.URI.parse(e.document.uri).path.endsWith("secrets.yaml")) {
-                // don't validate secrets
+        return __awaiter(this, void 0, void 0, function* () {
+            if (e.document.uri === null)
                 return;
-            }
-            if (this.validating_uri !== null) {
-                const lastRequestElapsedTime = new Date().getTime() - this.lastRequest.getTime();
-                // 10 seconds without response
-                if (lastRequestElapsedTime < 10000) {
+            try {
+                if (vscodeUri.URI.parse(e.document.uri).path.endsWith("secrets.yaml")) {
+                    // don't validate secrets
                     return;
                 }
-                console.log("Timeout waiting for previous validation to complete. Discarding.");
-            }
-            this.validating_uri = e.document.uri;
-            this.diagnosticCollection.clear();
-            this.diagnosticCollection.set(this.validating_uri, []);
-            const uri = this.validating_uri;
-            // Check if this is an included file
-            // console.log(`this file path: ${uri}`);
-            for (let key in this.includedFiles) {
-                // TODO: When an included file is in turn included, this should call the top most file, not the next one.
-                // console.log(`testing included files in: ${key} files: ${this.includedFiles[key]}`);
-                if (this.includedFiles[key].indexOf(uri) >= 0) {
-                    this.validating_uri = key;
-                    // console.log(`Not validating ${uri} as is listed as included file. Validating containing document ${key} instead`);
+                // Clear the "no esphome: key" warning when a different document becomes active
+                if (this.noEsphomeKeyWarningUri !== null &&
+                    this.noEsphomeKeyWarningUri !== e.document.uri) {
+                    this.sendDiagnostics(this.noEsphomeKeyWarningUri, []);
+                    this.noEsphomeKeyWarningUri = null;
                 }
+                if (this.validating_uri !== null) {
+                    const lastRequestElapsedTime = new Date().getTime() - this.lastRequest.getTime();
+                    // 10 seconds without response
+                    if (lastRequestElapsedTime < 10000) {
+                        return;
+                    }
+                    console.log("Timeout waiting for previous validation to complete. Discarding.");
+                }
+                this.validating_uri = e.document.uri;
+                this.diagnosticCollection.clear();
+                this.diagnosticCollection.set(this.validating_uri, []);
+                const uri = this.validating_uri;
+                // Check if this is an included file; walk up to the topmost including file
+                // console.log(`this file path: ${uri}`);
+                const visited = new Set();
+                let current = uri;
+                let foundParent = true;
+                while (foundParent) {
+                    foundParent = false;
+                    if (visited.has(current)) {
+                        break; // cycle guard
+                    }
+                    visited.add(current);
+                    for (let key in this.includedFiles) {
+                        if (this.includedFiles[key].indexOf(current) >= 0) {
+                            current = key;
+                            foundParent = true;
+                            // console.log(`Not validating ${uri} as is listed as included file. Validating containing document ${key} instead`);
+                            break;
+                        }
+                    }
+                }
+                this.validating_uri = current;
+                // Set lastRequest before the async gap so concurrent calls are locked out
+                // by the < 10000ms guard while we await the file read.
+                this.lastRequest = new Date();
+                // Check if the file to be validated has an `esphome:` top-level key.
+                // Without it ESPHome will always error, and the file is likely a package
+                // meant to be validated via its including file.
+                const fileContents = this.validating_uri === e.document.uri
+                    ? e.document.getText()
+                    : yield this.fileAccessor.getFileContents(this.validating_uri);
+                const hasEsphomeKey = fileContents
+                    .split("\n")
+                    .some((l) => l.startsWith("esphome:"));
+                if (!hasEsphomeKey) {
+                    const warningRange = vscode_languageserver_protocol_1.Range.create(0, 0, 0, 0);
+                    const warning = vscode_languageserver_protocol_1.Diagnostic.create(warningRange, "Validation is not being performed as 'esphome:' section missing. If this is a package, open the file using it to perform validation", vscode_languageserver_protocol_1.DiagnosticSeverity.Warning);
+                    this.sendDiagnostics(this.validating_uri, [warning]);
+                    this.noEsphomeKeyWarningUri = this.validating_uri;
+                    this.validating_uri = null;
+                    return;
+                }
+                console.log(`Validating ${this.validating_uri}`);
+                this.connection.sendMessage({
+                    type: "validate",
+                    file: vscodeUri.URI.parse(this.validating_uri).fsPath,
+                });
             }
-            console.log(`Validating ${this.validating_uri}`);
-            this.lastRequest = new Date();
-            this.connection.sendMessage({
-                type: "validate",
-                file: vscodeUri.URI.parse(this.validating_uri).fsPath,
-            });
-        }
-        catch (e) {
-            console.log(e);
-            this.validating_uri = null;
-        }
+            catch (e) {
+                console.log(e);
+                this.validating_uri = null;
+            }
+        });
     }
 }
 exports.Validation = Validation;
@@ -11870,15 +11957,24 @@ exports.ESPHomeDashboardConnection = ESPHomeDashboardConnection;
 "use strict";
 
 
-const WebSocket = __webpack_require__(89);
+const createWebSocketStream = __webpack_require__(89);
+const extension = __webpack_require__(108);
+const PerMessageDeflate = __webpack_require__(96);
+const Receiver = __webpack_require__(102);
+const Sender = __webpack_require__(106);
+const subprotocol = __webpack_require__(109);
+const WebSocket = __webpack_require__(90);
+const WebSocketServer = __webpack_require__(110);
 
-WebSocket.createWebSocketStream = __webpack_require__(108);
-WebSocket.Server = __webpack_require__(109);
-WebSocket.Receiver = __webpack_require__(101);
-WebSocket.Sender = __webpack_require__(105);
-
+WebSocket.createWebSocketStream = createWebSocketStream;
+WebSocket.extension = extension;
+WebSocket.PerMessageDeflate = PerMessageDeflate;
+WebSocket.Receiver = Receiver;
+WebSocket.Sender = Sender;
+WebSocket.Server = WebSocketServer;
+WebSocket.subprotocol = subprotocol;
 WebSocket.WebSocket = WebSocket;
-WebSocket.WebSocketServer = WebSocket.Server;
+WebSocket.WebSocketServer = WebSocketServer;
 
 module.exports = WebSocket;
 
@@ -11888,26 +11984,195 @@ module.exports = WebSocket;
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
+/* eslint no-unused-vars: ["error", { "varsIgnorePattern": "^WebSocket$" }] */
+
+
+const WebSocket = __webpack_require__(90);
+const { Duplex } = __webpack_require__(95);
+
+/**
+ * Emits the `'close'` event on a stream.
+ *
+ * @param {Duplex} stream The stream.
+ * @private
+ */
+function emitClose(stream) {
+  stream.emit('close');
+}
+
+/**
+ * The listener of the `'end'` event.
+ *
+ * @private
+ */
+function duplexOnEnd() {
+  if (!this.destroyed && this._writableState.finished) {
+    this.destroy();
+  }
+}
+
+/**
+ * The listener of the `'error'` event.
+ *
+ * @param {Error} err The error
+ * @private
+ */
+function duplexOnError(err) {
+  this.removeListener('error', duplexOnError);
+  this.destroy();
+  if (this.listenerCount('error') === 0) {
+    // Do not suppress the throwing behavior.
+    this.emit('error', err);
+  }
+}
+
+/**
+ * Wraps a `WebSocket` in a duplex stream.
+ *
+ * @param {WebSocket} ws The `WebSocket` to wrap
+ * @param {Object} [options] The options for the `Duplex` constructor
+ * @return {Duplex} The duplex stream
+ * @public
+ */
+function createWebSocketStream(ws, options) {
+  let terminateOnDestroy = true;
+
+  const duplex = new Duplex({
+    ...options,
+    autoDestroy: false,
+    emitClose: false,
+    objectMode: false,
+    writableObjectMode: false
+  });
+
+  ws.on('message', function message(msg, isBinary) {
+    const data =
+      !isBinary && duplex._readableState.objectMode ? msg.toString() : msg;
+
+    if (!duplex.push(data)) ws.pause();
+  });
+
+  ws.once('error', function error(err) {
+    if (duplex.destroyed) return;
+
+    // Prevent `ws.terminate()` from being called by `duplex._destroy()`.
+    //
+    // - If the `'error'` event is emitted before the `'open'` event, then
+    //   `ws.terminate()` is a noop as no socket is assigned.
+    // - Otherwise, the error is re-emitted by the listener of the `'error'`
+    //   event of the `Receiver` object. The listener already closes the
+    //   connection by calling `ws.close()`. This allows a close frame to be
+    //   sent to the other peer. If `ws.terminate()` is called right after this,
+    //   then the close frame might not be sent.
+    terminateOnDestroy = false;
+    duplex.destroy(err);
+  });
+
+  ws.once('close', function close() {
+    if (duplex.destroyed) return;
+
+    duplex.push(null);
+  });
+
+  duplex._destroy = function (err, callback) {
+    if (ws.readyState === ws.CLOSED) {
+      callback(err);
+      process.nextTick(emitClose, duplex);
+      return;
+    }
+
+    let called = false;
+
+    ws.once('error', function error(err) {
+      called = true;
+      callback(err);
+    });
+
+    ws.once('close', function close() {
+      if (!called) callback(err);
+      process.nextTick(emitClose, duplex);
+    });
+
+    if (terminateOnDestroy) ws.terminate();
+  };
+
+  duplex._final = function (callback) {
+    if (ws.readyState === ws.CONNECTING) {
+      ws.once('open', function open() {
+        duplex._final(callback);
+      });
+      return;
+    }
+
+    // If the value of the `_socket` property is `null` it means that `ws` is a
+    // client websocket and the handshake failed. In fact, when this happens, a
+    // socket is never assigned to the websocket. Wait for the `'error'` event
+    // that will be emitted by the websocket.
+    if (ws._socket === null) return;
+
+    if (ws._socket._writableState.finished) {
+      callback();
+      if (duplex._readableState.endEmitted) duplex.destroy();
+    } else {
+      ws._socket.once('finish', function finish() {
+        // `duplex` is not destroyed here because the `'end'` event will be
+        // emitted on `duplex` after this `'finish'` event. The EOF signaling
+        // `null` chunk is, in fact, pushed when the websocket emits `'close'`.
+        callback();
+      });
+      ws.close();
+    }
+  };
+
+  duplex._read = function () {
+    if (ws.isPaused) ws.resume();
+  };
+
+  duplex._write = function (chunk, encoding, callback) {
+    if (ws.readyState === ws.CONNECTING) {
+      ws.once('open', function open() {
+        duplex._write(chunk, encoding, callback);
+      });
+      return;
+    }
+
+    ws.send(chunk, callback);
+  };
+
+  duplex.on('end', duplexOnEnd);
+  duplex.on('error', duplexOnError);
+  return duplex;
+}
+
+module.exports = createWebSocketStream;
+
+
+/***/ }),
+/* 90 */
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+"use strict";
 /* eslint no-unused-vars: ["error", { "varsIgnorePattern": "^Duplex|Readable$", "caughtErrors": "none" }] */
 
 
 
-const EventEmitter = __webpack_require__(90);
-const https = __webpack_require__(91);
-const http = __webpack_require__(92);
+const EventEmitter = __webpack_require__(91);
+const https = __webpack_require__(92);
+const http = __webpack_require__(93);
 const net = __webpack_require__(28);
-const tls = __webpack_require__(93);
+const tls = __webpack_require__(94);
 const { randomBytes, createHash } = __webpack_require__(27);
-const { Duplex, Readable } = __webpack_require__(94);
+const { Duplex, Readable } = __webpack_require__(95);
 const { URL } = __webpack_require__(75);
 
-const PerMessageDeflate = __webpack_require__(95);
-const Receiver = __webpack_require__(101);
-const Sender = __webpack_require__(105);
-const { isBlob } = __webpack_require__(102);
+const PerMessageDeflate = __webpack_require__(96);
+const Receiver = __webpack_require__(102);
+const Sender = __webpack_require__(106);
+const { isBlob } = __webpack_require__(103);
 
 const {
   BINARY_TYPES,
+  CLOSE_TIMEOUT,
   EMPTY_BUFFER,
   GUID,
   kForOnEventAttribute,
@@ -11915,14 +12180,13 @@ const {
   kStatusCode,
   kWebSocket,
   NOOP
-} = __webpack_require__(98);
+} = __webpack_require__(99);
 const {
   EventTarget: { addEventListener, removeEventListener }
-} = __webpack_require__(106);
-const { format, parse } = __webpack_require__(107);
-const { toBuffer } = __webpack_require__(97);
+} = __webpack_require__(107);
+const { format, parse } = __webpack_require__(108);
+const { toBuffer } = __webpack_require__(98);
 
-const closeTimeout = 30 * 1000;
 const kAborted = Symbol('kAborted');
 const protocolVersions = [8, 13];
 const readyStates = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
@@ -11978,6 +12242,7 @@ class WebSocket extends EventEmitter {
       initAsClient(this, address, protocols, options);
     } else {
       this._autoPong = options.autoPong;
+      this._closeTimeout = options.closeTimeout;
       this._isServer = true;
     }
   }
@@ -12519,6 +12784,8 @@ module.exports = WebSocket;
  *     times in the same tick
  * @param {Boolean} [options.autoPong=true] Specifies whether or not to
  *     automatically send a pong in response to a ping
+ * @param {Number} [options.closeTimeout=30000] Duration in milliseconds to wait
+ *     for the closing handshake to finish after `websocket.close()` is called
  * @param {Function} [options.finishRequest] A function which can be used to
  *     customize the headers of each http request before it is sent
  * @param {Boolean} [options.followRedirects=false] Whether or not to follow
@@ -12545,6 +12812,7 @@ function initAsClient(websocket, address, protocols, options) {
   const opts = {
     allowSynchronousEvents: true,
     autoPong: true,
+    closeTimeout: CLOSE_TIMEOUT,
     protocolVersion: protocolVersions[1],
     maxPayload: 100 * 1024 * 1024,
     skipUTF8Validation: false,
@@ -12563,6 +12831,7 @@ function initAsClient(websocket, address, protocols, options) {
   };
 
   websocket._autoPong = opts.autoPong;
+  websocket._closeTimeout = opts.closeTimeout;
 
   if (!protocolVersions.includes(opts.protocolVersion)) {
     throw new RangeError(
@@ -12578,7 +12847,7 @@ function initAsClient(websocket, address, protocols, options) {
   } else {
     try {
       parsedUrl = new URL(address);
-    } catch (e) {
+    } catch {
       throw new SyntaxError(`Invalid URL: ${address}`);
     }
   }
@@ -12640,11 +12909,11 @@ function initAsClient(websocket, address, protocols, options) {
   opts.timeout = opts.handshakeTimeout;
 
   if (opts.perMessageDeflate) {
-    perMessageDeflate = new PerMessageDeflate(
-      opts.perMessageDeflate !== true ? opts.perMessageDeflate : {},
-      false,
-      opts.maxPayload
-    );
+    perMessageDeflate = new PerMessageDeflate({
+      ...opts.perMessageDeflate,
+      isServer: false,
+      maxPayload: opts.maxPayload
+    });
     opts.headers['Sec-WebSocket-Extensions'] = format({
       [PerMessageDeflate.extensionName]: perMessageDeflate.offer()
     });
@@ -13180,7 +13449,7 @@ function senderOnError(err) {
 function setCloseTimer(websocket) {
   websocket._closeTimer = setTimeout(
     websocket._socket.destroy.bind(websocket._socket),
-    closeTimeout
+    websocket._closeTimeout
   );
 }
 
@@ -13198,23 +13467,23 @@ function socketOnClose() {
 
   websocket._readyState = WebSocket.CLOSING;
 
-  let chunk;
-
   //
   // The close frame might not have been received or the `'end'` event emitted,
   // for example, if the socket was destroyed due to an error. Ensure that the
   // `receiver` stream is closed after writing any remaining buffered data to
   // it. If the readable side of the socket is in flowing mode then there is no
-  // buffered data as everything has been already written and `readable.read()`
-  // will return `null`. If instead, the socket is paused, any possible buffered
-  // data will be read as a single chunk.
+  // buffered data as everything has been already written. If instead, the
+  // socket is paused, any possible buffered data will be read as a single
+  // chunk.
   //
   if (
     !this._readableState.endEmitted &&
     !websocket._closeFrameReceived &&
     !websocket._receiver._writableState.errorEmitted &&
-    (chunk = websocket._socket.read()) !== null
+    this._readableState.length !== 0
   ) {
+    const chunk = this.read(this._readableState.length);
+
     websocket._receiver.write(chunk);
   }
 
@@ -13279,52 +13548,52 @@ function socketOnError() {
 
 
 /***/ }),
-/* 90 */
+/* 91 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("events");
 
 /***/ }),
-/* 91 */
+/* 92 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("https");
 
 /***/ }),
-/* 92 */
+/* 93 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("http");
 
 /***/ }),
-/* 93 */
+/* 94 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("tls");
 
 /***/ }),
-/* 94 */
+/* 95 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("stream");
 
 /***/ }),
-/* 95 */
+/* 96 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const zlib = __webpack_require__(96);
+const zlib = __webpack_require__(97);
 
-const bufferUtil = __webpack_require__(97);
-const Limiter = __webpack_require__(100);
-const { kStatusCode } = __webpack_require__(98);
+const bufferUtil = __webpack_require__(98);
+const Limiter = __webpack_require__(101);
+const { kStatusCode } = __webpack_require__(99);
 
 const FastBuffer = Buffer[Symbol.species];
 const TRAILER = Buffer.from([0x00, 0x00, 0xff, 0xff]);
@@ -13357,6 +13626,9 @@ class PerMessageDeflate {
    *     acknowledge disabling of client context takeover
    * @param {Number} [options.concurrencyLimit=10] The number of concurrent
    *     calls to zlib
+   * @param {Boolean} [options.isServer=false] Create the instance in either
+   *     server or client mode
+   * @param {Number} [options.maxPayload=0] The maximum allowed message length
    * @param {(Boolean|Number)} [options.serverMaxWindowBits] Request/confirm the
    *     use of a custom server window size
    * @param {Boolean} [options.serverNoContextTakeover=false] Request/accept
@@ -13367,16 +13639,13 @@ class PerMessageDeflate {
    *     deflate
    * @param {Object} [options.zlibInflateOptions] Options to pass to zlib on
    *     inflate
-   * @param {Boolean} [isServer=false] Create the instance in either server or
-   *     client mode
-   * @param {Number} [maxPayload=0] The maximum allowed message length
    */
-  constructor(options, isServer, maxPayload) {
-    this._maxPayload = maxPayload | 0;
+  constructor(options) {
     this._options = options || {};
     this._threshold =
       this._options.threshold !== undefined ? this._options.threshold : 1024;
-    this._isServer = !!isServer;
+    this._maxPayload = this._options.maxPayload | 0;
+    this._isServer = !!this._options.isServer;
     this._deflate = null;
     this._inflate = null;
 
@@ -13849,20 +14118,20 @@ function inflateOnError(err) {
 
 
 /***/ }),
-/* 96 */
+/* 97 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("zlib");
 
 /***/ }),
-/* 97 */
+/* 98 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const { EMPTY_BUFFER } = __webpack_require__(98);
+const { EMPTY_BUFFER } = __webpack_require__(99);
 
 const FastBuffer = Buffer[Symbol.species];
 
@@ -13976,7 +14245,7 @@ module.exports = {
 /* istanbul ignore else  */
 if (!process.env.WS_NO_BUFFER_UTIL) {
   try {
-    const bufferUtil = __webpack_require__(99);
+    const bufferUtil = __webpack_require__(100);
 
     module.exports.mask = function (source, mask, output, offset, length) {
       if (length < 48) _mask(source, mask, output, offset, length);
@@ -13994,7 +14263,7 @@ if (!process.env.WS_NO_BUFFER_UTIL) {
 
 
 /***/ }),
-/* 98 */
+/* 99 */
 /***/ ((module) => {
 
 "use strict";
@@ -14007,6 +14276,7 @@ if (hasBlob) BINARY_TYPES.push('blob');
 
 module.exports = {
   BINARY_TYPES,
+  CLOSE_TIMEOUT: 30000,
   EMPTY_BUFFER: Buffer.alloc(0),
   GUID: '258EAFA5-E914-47DA-95CA-C5AB0DC85B11',
   hasBlob,
@@ -14019,14 +14289,14 @@ module.exports = {
 
 
 /***/ }),
-/* 99 */
+/* 100 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("bufferutil");
 
 /***/ }),
-/* 100 */
+/* 101 */
 /***/ ((module) => {
 
 "use strict";
@@ -14088,23 +14358,23 @@ module.exports = Limiter;
 
 
 /***/ }),
-/* 101 */
+/* 102 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const { Writable } = __webpack_require__(94);
+const { Writable } = __webpack_require__(95);
 
-const PerMessageDeflate = __webpack_require__(95);
+const PerMessageDeflate = __webpack_require__(96);
 const {
   BINARY_TYPES,
   EMPTY_BUFFER,
   kStatusCode,
   kWebSocket
-} = __webpack_require__(98);
-const { concat, toArrayBuffer, unmask } = __webpack_require__(97);
-const { isValidStatusCode, isValidUTF8 } = __webpack_require__(102);
+} = __webpack_require__(99);
+const { concat, toArrayBuffer, unmask } = __webpack_require__(98);
+const { isValidStatusCode, isValidUTF8 } = __webpack_require__(103);
 
 const FastBuffer = Buffer[Symbol.species];
 
@@ -14801,15 +15071,15 @@ module.exports = Receiver;
 
 
 /***/ }),
-/* 102 */
+/* 103 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const { isUtf8 } = __webpack_require__(103);
+const { isUtf8 } = __webpack_require__(104);
 
-const { hasBlob } = __webpack_require__(98);
+const { hasBlob } = __webpack_require__(99);
 
 //
 // Allowed token characters:
@@ -14948,7 +15218,7 @@ if (isUtf8) {
   };
 } /* istanbul ignore else  */ else if (!process.env.WS_NO_UTF_8_VALIDATE) {
   try {
-    const isValidUTF8 = __webpack_require__(104);
+    const isValidUTF8 = __webpack_require__(105);
 
     module.exports.isValidUTF8 = function (buf) {
       return buf.length < 32 ? _isValidUTF8(buf) : isValidUTF8(buf);
@@ -14960,21 +15230,21 @@ if (isUtf8) {
 
 
 /***/ }),
-/* 103 */
+/* 104 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("buffer");
 
 /***/ }),
-/* 104 */
+/* 105 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("utf-8-validate");
 
 /***/ }),
-/* 105 */
+/* 106 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -14982,13 +15252,13 @@ module.exports = require("utf-8-validate");
 
 
 
-const { Duplex } = __webpack_require__(94);
+const { Duplex } = __webpack_require__(95);
 const { randomFillSync } = __webpack_require__(27);
 
-const PerMessageDeflate = __webpack_require__(95);
-const { EMPTY_BUFFER, kWebSocket, NOOP } = __webpack_require__(98);
-const { isBlob, isValidStatusCode } = __webpack_require__(102);
-const { mask: applyMask, toBuffer } = __webpack_require__(97);
+const PerMessageDeflate = __webpack_require__(96);
+const { EMPTY_BUFFER, kWebSocket, NOOP } = __webpack_require__(99);
+const { isBlob, isValidStatusCode } = __webpack_require__(103);
+const { mask: applyMask, toBuffer } = __webpack_require__(98);
 
 const kByteLength = Symbol('kByteLength');
 const maskBuffer = Buffer.alloc(4);
@@ -15583,13 +15853,13 @@ function onError(sender, err, cb) {
 
 
 /***/ }),
-/* 106 */
+/* 107 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const { kForOnEventAttribute, kListener } = __webpack_require__(98);
+const { kForOnEventAttribute, kListener } = __webpack_require__(99);
 
 const kCode = Symbol('kCode');
 const kData = Symbol('kData');
@@ -15882,13 +16152,13 @@ function callListener(listener, thisArg, event) {
 
 
 /***/ }),
-/* 107 */
+/* 108 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const { tokenChars } = __webpack_require__(102);
+const { tokenChars } = __webpack_require__(103);
 
 /**
  * Adds an offer to the map of extension offers or a parameter to the map of
@@ -16092,175 +16362,76 @@ module.exports = { format, parse };
 
 
 /***/ }),
-/* 108 */
+/* 109 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
-/* eslint no-unused-vars: ["error", { "varsIgnorePattern": "^WebSocket$" }] */
 
 
-const WebSocket = __webpack_require__(89);
-const { Duplex } = __webpack_require__(94);
+const { tokenChars } = __webpack_require__(103);
 
 /**
- * Emits the `'close'` event on a stream.
+ * Parses the `Sec-WebSocket-Protocol` header into a set of subprotocol names.
  *
- * @param {Duplex} stream The stream.
- * @private
- */
-function emitClose(stream) {
-  stream.emit('close');
-}
-
-/**
- * The listener of the `'end'` event.
- *
- * @private
- */
-function duplexOnEnd() {
-  if (!this.destroyed && this._writableState.finished) {
-    this.destroy();
-  }
-}
-
-/**
- * The listener of the `'error'` event.
- *
- * @param {Error} err The error
- * @private
- */
-function duplexOnError(err) {
-  this.removeListener('error', duplexOnError);
-  this.destroy();
-  if (this.listenerCount('error') === 0) {
-    // Do not suppress the throwing behavior.
-    this.emit('error', err);
-  }
-}
-
-/**
- * Wraps a `WebSocket` in a duplex stream.
- *
- * @param {WebSocket} ws The `WebSocket` to wrap
- * @param {Object} [options] The options for the `Duplex` constructor
- * @return {Duplex} The duplex stream
+ * @param {String} header The field value of the header
+ * @return {Set} The subprotocol names
  * @public
  */
-function createWebSocketStream(ws, options) {
-  let terminateOnDestroy = true;
+function parse(header) {
+  const protocols = new Set();
+  let start = -1;
+  let end = -1;
+  let i = 0;
 
-  const duplex = new Duplex({
-    ...options,
-    autoDestroy: false,
-    emitClose: false,
-    objectMode: false,
-    writableObjectMode: false
-  });
+  for (i; i < header.length; i++) {
+    const code = header.charCodeAt(i);
 
-  ws.on('message', function message(msg, isBinary) {
-    const data =
-      !isBinary && duplex._readableState.objectMode ? msg.toString() : msg;
+    if (end === -1 && tokenChars[code] === 1) {
+      if (start === -1) start = i;
+    } else if (
+      i !== 0 &&
+      (code === 0x20 /* ' ' */ || code === 0x09) /* '\t' */
+    ) {
+      if (end === -1 && start !== -1) end = i;
+    } else if (code === 0x2c /* ',' */) {
+      if (start === -1) {
+        throw new SyntaxError(`Unexpected character at index ${i}`);
+      }
 
-    if (!duplex.push(data)) ws.pause();
-  });
+      if (end === -1) end = i;
 
-  ws.once('error', function error(err) {
-    if (duplex.destroyed) return;
+      const protocol = header.slice(start, end);
 
-    // Prevent `ws.terminate()` from being called by `duplex._destroy()`.
-    //
-    // - If the `'error'` event is emitted before the `'open'` event, then
-    //   `ws.terminate()` is a noop as no socket is assigned.
-    // - Otherwise, the error is re-emitted by the listener of the `'error'`
-    //   event of the `Receiver` object. The listener already closes the
-    //   connection by calling `ws.close()`. This allows a close frame to be
-    //   sent to the other peer. If `ws.terminate()` is called right after this,
-    //   then the close frame might not be sent.
-    terminateOnDestroy = false;
-    duplex.destroy(err);
-  });
+      if (protocols.has(protocol)) {
+        throw new SyntaxError(`The "${protocol}" subprotocol is duplicated`);
+      }
 
-  ws.once('close', function close() {
-    if (duplex.destroyed) return;
-
-    duplex.push(null);
-  });
-
-  duplex._destroy = function (err, callback) {
-    if (ws.readyState === ws.CLOSED) {
-      callback(err);
-      process.nextTick(emitClose, duplex);
-      return;
-    }
-
-    let called = false;
-
-    ws.once('error', function error(err) {
-      called = true;
-      callback(err);
-    });
-
-    ws.once('close', function close() {
-      if (!called) callback(err);
-      process.nextTick(emitClose, duplex);
-    });
-
-    if (terminateOnDestroy) ws.terminate();
-  };
-
-  duplex._final = function (callback) {
-    if (ws.readyState === ws.CONNECTING) {
-      ws.once('open', function open() {
-        duplex._final(callback);
-      });
-      return;
-    }
-
-    // If the value of the `_socket` property is `null` it means that `ws` is a
-    // client websocket and the handshake failed. In fact, when this happens, a
-    // socket is never assigned to the websocket. Wait for the `'error'` event
-    // that will be emitted by the websocket.
-    if (ws._socket === null) return;
-
-    if (ws._socket._writableState.finished) {
-      callback();
-      if (duplex._readableState.endEmitted) duplex.destroy();
+      protocols.add(protocol);
+      start = end = -1;
     } else {
-      ws._socket.once('finish', function finish() {
-        // `duplex` is not destroyed here because the `'end'` event will be
-        // emitted on `duplex` after this `'finish'` event. The EOF signaling
-        // `null` chunk is, in fact, pushed when the websocket emits `'close'`.
-        callback();
-      });
-      ws.close();
+      throw new SyntaxError(`Unexpected character at index ${i}`);
     }
-  };
+  }
 
-  duplex._read = function () {
-    if (ws.isPaused) ws.resume();
-  };
+  if (start === -1 || end !== -1) {
+    throw new SyntaxError('Unexpected end of input');
+  }
 
-  duplex._write = function (chunk, encoding, callback) {
-    if (ws.readyState === ws.CONNECTING) {
-      ws.once('open', function open() {
-        duplex._write(chunk, encoding, callback);
-      });
-      return;
-    }
+  const protocol = header.slice(start, i);
 
-    ws.send(chunk, callback);
-  };
+  if (protocols.has(protocol)) {
+    throw new SyntaxError(`The "${protocol}" subprotocol is duplicated`);
+  }
 
-  duplex.on('end', duplexOnEnd);
-  duplex.on('error', duplexOnError);
-  return duplex;
+  protocols.add(protocol);
+  return protocols;
 }
 
-module.exports = createWebSocketStream;
+module.exports = { parse };
 
 
 /***/ }),
-/* 109 */
+/* 110 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -16268,16 +16439,16 @@ module.exports = createWebSocketStream;
 
 
 
-const EventEmitter = __webpack_require__(90);
-const http = __webpack_require__(92);
-const { Duplex } = __webpack_require__(94);
+const EventEmitter = __webpack_require__(91);
+const http = __webpack_require__(93);
+const { Duplex } = __webpack_require__(95);
 const { createHash } = __webpack_require__(27);
 
-const extension = __webpack_require__(107);
-const PerMessageDeflate = __webpack_require__(95);
-const subprotocol = __webpack_require__(110);
-const WebSocket = __webpack_require__(89);
-const { GUID, kWebSocket } = __webpack_require__(98);
+const extension = __webpack_require__(108);
+const PerMessageDeflate = __webpack_require__(96);
+const subprotocol = __webpack_require__(109);
+const WebSocket = __webpack_require__(90);
+const { CLOSE_TIMEOUT, GUID, kWebSocket } = __webpack_require__(99);
 
 const keyRegex = /^[+/0-9A-Za-z]{22}==$/;
 
@@ -16304,6 +16475,9 @@ class WebSocketServer extends EventEmitter {
    *     pending connections
    * @param {Boolean} [options.clientTracking=true] Specifies whether or not to
    *     track clients
+   * @param {Number} [options.closeTimeout=30000] Duration in milliseconds to
+   *     wait for the closing handshake to finish after `websocket.close()` is
+   *     called
    * @param {Function} [options.handleProtocols] A hook to handle protocols
    * @param {String} [options.host] The hostname where to bind the server
    * @param {Number} [options.maxPayload=104857600] The maximum allowed message
@@ -16333,6 +16507,7 @@ class WebSocketServer extends EventEmitter {
       perMessageDeflate: false,
       handleProtocols: null,
       clientTracking: true,
+      closeTimeout: CLOSE_TIMEOUT,
       verifyClient: null,
       noServer: false,
       backlog: null, // use default (511 as implemented in net.js)
@@ -16555,11 +16730,11 @@ class WebSocketServer extends EventEmitter {
       this.options.perMessageDeflate &&
       secWebSocketExtensions !== undefined
     ) {
-      const perMessageDeflate = new PerMessageDeflate(
-        this.options.perMessageDeflate,
-        true,
-        this.options.maxPayload
-      );
+      const perMessageDeflate = new PerMessageDeflate({
+        ...this.options.perMessageDeflate,
+        isServer: true,
+        maxPayload: this.options.maxPayload
+      });
 
       try {
         const offers = extension.parse(secWebSocketExtensions);
@@ -16817,75 +16992,6 @@ function abortHandshakeOrEmitwsClientError(
 
 
 /***/ }),
-/* 110 */
-/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
-
-"use strict";
-
-
-const { tokenChars } = __webpack_require__(102);
-
-/**
- * Parses the `Sec-WebSocket-Protocol` header into a set of subprotocol names.
- *
- * @param {String} header The field value of the header
- * @return {Set} The subprotocol names
- * @public
- */
-function parse(header) {
-  const protocols = new Set();
-  let start = -1;
-  let end = -1;
-  let i = 0;
-
-  for (i; i < header.length; i++) {
-    const code = header.charCodeAt(i);
-
-    if (end === -1 && tokenChars[code] === 1) {
-      if (start === -1) start = i;
-    } else if (
-      i !== 0 &&
-      (code === 0x20 /* ' ' */ || code === 0x09) /* '\t' */
-    ) {
-      if (end === -1 && start !== -1) end = i;
-    } else if (code === 0x2c /* ',' */) {
-      if (start === -1) {
-        throw new SyntaxError(`Unexpected character at index ${i}`);
-      }
-
-      if (end === -1) end = i;
-
-      const protocol = header.slice(start, end);
-
-      if (protocols.has(protocol)) {
-        throw new SyntaxError(`The "${protocol}" subprotocol is duplicated`);
-      }
-
-      protocols.add(protocol);
-      start = end = -1;
-    } else {
-      throw new SyntaxError(`Unexpected character at index ${i}`);
-    }
-  }
-
-  if (start === -1 || end !== -1) {
-    throw new SyntaxError('Unexpected end of input');
-  }
-
-  const protocol = header.slice(start, i);
-
-  if (protocols.has(protocol)) {
-    throw new SyntaxError(`The "${protocol}" subprotocol is duplicated`);
-  }
-
-  protocols.add(protocol);
-  return protocols;
-}
-
-module.exports = { parse };
-
-
-/***/ }),
 /* 111 */
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -16908,7 +17014,7 @@ class ESPHomeConnection {
         this._isConnected = v;
     }
     handleMessage(msg) {
-        console.log("rcvd " + JSON.stringify(msg).substring(0, 150));
+        console.log("rcvd " + JSON.stringify(msg).substring(0, 550));
         this.handleMessage_(msg);
     }
     onResponse(handleMessage) {
@@ -17000,16 +17106,18 @@ class ESPHomeLocalConnection extends connection_1.ESPHomeConnection {
             });
             if (this.process.stdout !== null) {
                 this.process.stdout.on("data", (data) => {
-                    try {
-                        if (data.length < 2) {
-                            console.log(`Unexpected data too small: ${data}'`);
-                            return;
+                    const lines = data.toString().split("\n");
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (trimmed.length < 2)
+                            continue;
+                        try {
+                            const msg = JSON.parse(trimmed);
+                            this.handleMessage(msg);
                         }
-                        const msg = JSON.parse(data);
-                        this.handleMessage(msg);
-                    }
-                    catch (e) {
-                        console.log(`Error handling response: data: ${typeof data}: '${data === null || data === void 0 ? void 0 : data.toString()}' ${e}`);
+                        catch (e) {
+                            console.log(`Error handling response: data: ${typeof data}: '${trimmed}' ${e}`);
+                        }
                     }
                 });
             }
@@ -17074,7 +17182,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.HoverHandler = void 0;
 const yaml_1 = __webpack_require__(115);
 const editor_shims_1 = __webpack_require__(187);
-const objects_1 = __webpack_require__(298);
+const objects_1 = __webpack_require__(299);
 class HoverHandler {
     constructor(documents) {
         this.documents = documents;
@@ -18335,7 +18443,7 @@ class Alias extends Node.NodeBase {
             data = anchors.get(source);
         }
         /* istanbul ignore if */
-        if (!data || data.res === undefined) {
+        if (data?.res === undefined) {
             const msg = 'This should not happen: Alias anchor was not resolved?';
             throw new ReferenceError(msg);
         }
@@ -19075,7 +19183,7 @@ function stringifyPair({ key, value }, ctx, onComment, onChompKeep) {
             ws += `\n${stringifyComment.indentComment(cs, ctx.indent)}`;
         }
         if (valueStr === '' && !ctx.inFlow) {
-            if (ws === '\n')
+            if (ws === '\n' && valueComment)
                 ws = '\n\n';
         }
         else {
@@ -19153,6 +19261,7 @@ function createStringifyContext(doc, options) {
         nullStr: 'null',
         simpleKeys: false,
         singleQuote: null,
+        trailingComma: false,
         trueStr: 'true',
         verifyAliasOrder: true
     }, doc.schema.toStringOptions, options);
@@ -19461,7 +19570,7 @@ function blockString({ comment, type, value }, ctx, onComment, onChompKeep) {
     const { blockQuote, commentString, lineWidth } = ctx.options;
     // 1. Block can't end in whitespace unless the last line is non-empty.
     // 2. Strings consisting of only whitespace are best rendered explicitly.
-    if (!blockQuote || /\n[\t ]+$/.test(value) || /^\s*$/.test(value)) {
+    if (!blockQuote || /\n[\t ]+$/.test(value)) {
         return quotedString(value, ctx);
     }
     const indent = ctx.indent ||
@@ -20306,12 +20415,22 @@ function stringifyFlowCollection({ items }, ctx, { flowChars, itemIndent }) {
         if (comment)
             reqNewline = true;
         let str = stringify.stringify(item, itemCtx, () => (comment = null));
-        if (i < items.length - 1)
+        reqNewline || (reqNewline = lines.length > linesAtValue || str.includes('\n'));
+        if (i < items.length - 1) {
             str += ',';
+        }
+        else if (ctx.options.trailingComma) {
+            if (ctx.options.lineWidth > 0) {
+                reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) +
+                    (str.length + 2) >
+                    ctx.options.lineWidth);
+            }
+            if (reqNewline) {
+                str += ',';
+            }
+        }
         if (comment)
             str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
-        if (!reqNewline && (lines.length > linesAtValue || str.includes('\n')))
-            reqNewline = true;
         lines.push(str);
         linesAtValue = lines.length;
     }
@@ -20743,7 +20862,7 @@ function stringifyNumber({ format, minFractionDigits, tag, value }) {
     const num = typeof value === 'number' ? value : Number(value);
     if (!isFinite(num))
         return isNaN(num) ? '.nan' : num < 0 ? '-.inf' : '.inf';
-    let n = JSON.stringify(value);
+    let n = Object.is(value, -0) ? '-0' : JSON.stringify(value);
     if (!format &&
         minFractionDigits &&
         (!tag || tag === 'tag:yaml.org,2002:float') &&
@@ -20922,7 +21041,7 @@ exports.schema = schema;
 "use strict";
 
 
-var node_buffer = __webpack_require__(103);
+var node_buffer = __webpack_require__(104);
 var Scalar = __webpack_require__(128);
 var stringifyString = __webpack_require__(133);
 
@@ -21753,7 +21872,7 @@ const prettifyError = (src, lc) => (error) => {
     if (/[^ ]/.test(lineStr)) {
         let count = 1;
         const end = error.linePos[1];
-        if (end && end.line === line && end.col > col) {
+        if (end?.line === line && end.col > col) {
             count = Math.max(1, Math.min(end.col - col, 80 - ci));
         }
         const pointer = ' '.repeat(ci) + '^'.repeat(count);
@@ -21856,19 +21975,26 @@ function composeNode(ctx, token, props, onError) {
         case 'block-map':
         case 'block-seq':
         case 'flow-collection':
-            node = composeCollection.composeCollection(CN, ctx, token, props, onError);
-            if (anchor)
-                node.anchor = anchor.source.substring(1);
+            try {
+                node = composeCollection.composeCollection(CN, ctx, token, props, onError);
+                if (anchor)
+                    node.anchor = anchor.source.substring(1);
+            }
+            catch (error) {
+                // Almost certainly here due to a stack overflow
+                const message = error instanceof Error ? error.message : String(error);
+                onError(token, 'RESOURCE_EXHAUSTION', message);
+            }
             break;
         default: {
             const message = token.type === 'error'
                 ? token.message
                 : `Unsupported token (type: ${token.type})`;
             onError(token, 'UNEXPECTED_TOKEN', message);
-            node = composeEmptyNode(ctx, token.offset, undefined, null, props, onError);
             isSrcToken = false;
         }
     }
+    node ?? (node = composeEmptyNode(ctx, token.offset, undefined, null, props, onError));
     if (anchor && node.anchor === '')
         onError(anchor, 'BAD_ALIAS', 'Anchor cannot be an empty string');
     if (atKey &&
@@ -21999,7 +22125,7 @@ function composeCollection(CN, ctx, token, props, onError) {
     let tag = ctx.schema.tags.find(t => t.tag === tagName && t.collection === expType);
     if (!tag) {
         const kt = ctx.schema.knownTags[tagName];
-        if (kt && kt.collection === expType) {
+        if (kt?.collection === expType) {
             ctx.schema.tags.push(Object.assign({}, kt, { default: false }));
             tag = kt;
         }
@@ -22427,7 +22553,7 @@ function resolveBlockSeq({ composeNode, composeEmptyNode }, ctx, bs, onError, ta
         });
         if (!props.found) {
             if (props.anchor || props.tag || value) {
-                if (value && value.type === 'block-seq')
+                if (value?.type === 'block-seq')
                     onError(props.end, 'BAD_INDENT', 'All sequence items must start at the same column');
                 else
                     onError(offset, 'MISSING_CHAR', 'Sequence item without - indicator');
@@ -22596,7 +22722,7 @@ function resolveFlowCollection({ composeNode, composeEmptyNode }, ctx, fc, onErr
                 }
             }
             else if (value) {
-                if ('source' in value && value.source && value.source[0] === ':')
+                if ('source' in value && value.source?.[0] === ':')
                     onError(value, 'MISSING_CHAR', `Missing space after : in ${fcName}`);
                 else
                     onError(valueProps.start, 'MISSING_CHAR', `Missing , or : between ${fcName} items`);
@@ -22640,7 +22766,7 @@ function resolveFlowCollection({ composeNode, composeEmptyNode }, ctx, fc, onErr
     const expectedEnd = isMap ? '}' : ']';
     const [ce, ...ee] = fc.end;
     let cePos = offset;
-    if (ce && ce.source === expectedEnd)
+    if (ce?.source === expectedEnd)
         cePos = ce.offset + ce.source.length;
     else {
         const name = fcName[0].toUpperCase() + fcName.substring(1);
@@ -24817,7 +24943,7 @@ class Parser {
     }
     *step() {
         const top = this.peek(1);
-        if (this.type === 'doc-end' && (!top || top.type !== 'doc-end')) {
+        if (this.type === 'doc-end' && top?.type !== 'doc-end') {
             while (this.stack.length > 0)
                 yield* this.pop();
             this.stack.push({
@@ -25349,7 +25475,7 @@ class Parser {
             do {
                 yield* this.pop();
                 top = this.peek(1);
-            } while (top && top.type === 'flow-collection');
+            } while (top?.type === 'flow-collection');
         }
         else if (fc.end.length === 0) {
             switch (this.type) {
@@ -25759,7 +25885,7 @@ exports.createCompletionSnippet = createCompletionSnippet;
 
 /***/ }),
 /* 188 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+/***/ (function(__unused_webpack_module, exports) {
 
 "use strict";
 
@@ -25773,6 +25899,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 var __await = (this && this.__await) || function (v) { return this instanceof __await ? (this.v = v, this) : new __await(v); }
+var __asyncValues = (this && this.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
 var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _arguments, generator) {
     if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
     var g = generator.apply(thisArg, _arguments || []), i, q = [];
@@ -25785,16 +25918,8 @@ var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _ar
     function reject(value) { resume("throw", value); }
     function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
 };
-var __asyncValues = (this && this.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ESPHomeSchema = void 0;
-const yaml_1 = __webpack_require__(115);
 class ESPHomeSchema {
     constructor(schemaLoader) {
         this.schemaLoader = schemaLoader;
@@ -25859,124 +25984,149 @@ class ESPHomeSchema {
             return name in (yield this.getSchema()).core.platforms;
         });
     }
-    getDocComponents(doc) {
-        return __asyncGenerator(this, arguments, function* getDocComponents_1() {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
-            const docMap = doc.contents;
-            let addPollingComponent = false;
-            const yieldedComponents = [];
-            for (const k of docMap.items) {
-                if ((0, yaml_1.isPair)(k) && (0, yaml_1.isScalar)(k.key)) {
-                    const componentName = k.key.value;
-                    const isPlatformComponent = yield __await(this.isPlatform(componentName));
-                    if (!isPlatformComponent &&
-                        !(componentName in (yield __await(this.getSchema())).core.components)) {
-                        // invalid or unknown name
+    /**
+     * Iterate config vars for a schema. Accepts an optional YAMLMap from the
+     * current document to enable context-aware filtering (e.g. MQTT props).
+     */
+    iterConfigVars(schema_1, docMap_1) {
+        return __asyncGenerator(this, arguments, function* iterConfigVars_1(schema, docMap, yielded = []) {
+            var _a, e_1, _b, _c;
+            var _d;
+            for (var prop in schema.config_vars) {
+                if (((_d = schema.extends) === null || _d === void 0 ? void 0 : _d.includes("core.MQTT_COMPONENT_SCHEMA")) &&
+                    (prop === "mqtt_id" || prop === "expire_after") &&
+                    (docMap === null || docMap === void 0 ? void 0 : docMap.get("mqtt")) === undefined) {
+                    // filter mqtt props if mqtt is not used
+                    continue;
+                }
+                if (yielded.includes(prop)) {
+                    continue;
+                }
+                yielded.push(prop);
+                yield yield __await([prop, yield __await(this.getConfigVarComplete(schema, prop))]);
+            }
+            if (schema.extends !== undefined) {
+                for (var extended of schema.extends) {
+                    if (extended.startsWith("core.MQTT") &&
+                        (docMap === null || docMap === void 0 ? void 0 : docMap.get("mqtt")) === undefined) {
                         continue;
                     }
-                    const component = yield __await(this.getComponent(componentName));
-                    if (!yieldedComponents.includes(componentName)) {
-                        yield yield __await([componentName, component, k.value]);
-                        yieldedComponents.push(componentName);
-                    }
-                    if (isPlatformComponent) {
-                        // iterate elements and lookup platform to load components
-                        const platList = docMap.get(componentName);
-                        if ((0, yaml_1.isSeq)(platList)) {
-                            for (const plat of platList.items) {
-                                if ((0, yaml_1.isMap)(plat)) {
-                                    const platCompName = plat.get("platform");
-                                    if (platCompName in component.components) {
-                                        if (!addPollingComponent) {
-                                            const platComponent = yield __await(this.getComponent(platCompName, componentName));
-                                            if ((_e = (_d = (_c = (_b = (_a = platComponent.schemas.CONFIG_SCHEMA) === null || _a === void 0 ? void 0 : _a.schema) === null || _b === void 0 ? void 0 : _b.config_vars.id) === null || _c === void 0 ? void 0 : _c.id_type) === null || _d === void 0 ? void 0 : _d.parents) === null || _e === void 0 ? void 0 : _e.includes("PollingComponent")) {
-                                                addPollingComponent = true;
-                                            }
-                                        }
-                                        if (!yieldedComponents.includes(platCompName)) {
-                                            yield yield __await([
-                                                platCompName,
-                                                yield __await(this.getComponent(platCompName)),
-                                                plat,
-                                            ]);
-                                            yieldedComponents.push(platCompName);
-                                        }
-                                    }
-                                }
+                    const s = yield __await(this.getExtendedConfigVar(extended));
+                    if (s.type === "schema") {
+                        try {
+                            for (var _e = true, _f = (e_1 = void 0, __asyncValues(this.iterConfigVars(s.schema, docMap, yielded))), _g; _g = yield __await(_f.next()), _a = _g.done, !_a; _e = true) {
+                                _c = _g.value;
+                                _e = false;
+                                const pair = _c;
+                                yield yield __await(pair);
                             }
                         }
+                        catch (e_1_1) { e_1 = { error: e_1_1 }; }
+                        finally {
+                            try {
+                                if (!_e && !_a && (_b = _f.return)) yield __await(_b.call(_f));
+                            }
+                            finally { if (e_1) throw e_1.error; }
+                        }
                     }
-                    else {
-                        if (!addPollingComponent &&
-                            ((_k = (_j = (_h = (_g = (_f = component.schemas.CONFIG_SCHEMA) === null || _f === void 0 ? void 0 : _f.schema) === null || _g === void 0 ? void 0 : _g.config_vars.id) === null || _h === void 0 ? void 0 : _h.id_type) === null || _j === void 0 ? void 0 : _j.parents) === null || _k === void 0 ? void 0 : _k.includes("PollingComponent"))) {
-                            addPollingComponent = true;
-                        }
-                        if (componentName === "api" &&
-                            !yieldedComponents.includes("homeassistant")) {
-                            yield yield __await([
-                                "homeassistant",
-                                yield __await(this.getComponent("homeassistant")),
-                                k.value,
-                            ]);
-                        }
+                    else if (s.type === "typed") {
+                        yield yield __await([s.typed_key, s]);
                     }
                 }
             }
-            if (addPollingComponent) {
-                yield yield __await(["component", yield __await(this.getComponent("component")), undefined]);
-            }
-            yield yield __await(["core", (yield __await(this.getSchema())).core, undefined]);
         });
     }
-    getRegistry(registry, doc) {
-        return __asyncGenerator(this, arguments, function* getRegistry_1() {
-            var _a, e_1, _b, _c;
-            if (registry.includes(".")) {
-                // e.g. sensor.filter only items from one component
-                const [domain, registryName] = registry.split(".");
-                if (this.isRegistry(registryName)) {
-                    for (const name in (yield __await(this.getSchema()))[domain][registryName]) {
-                        yield yield __await([name, (yield __await(this.getSchema()))[domain][registryName][name]]);
+    findConfigVar(schema, prop, docMap) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, e_2, _b, _c;
+            try {
+                for (var _d = true, _e = __asyncValues(this.iterConfigVars(schema, docMap)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                    _c = _f.value;
+                    _d = false;
+                    const [p, config] = _c;
+                    if (p === prop) {
+                        return config;
                     }
                 }
             }
-            else {
-                // e.g. action, condition: search in all domains
-                if (this.isRegistry(registry))
-                    try {
-                        for (var _d = true, _e = __asyncValues(this.getDocComponents(doc)), _f; _f = yield __await(_e.next()), _a = _f.done, !_a; _d = true) {
-                            _c = _f.value;
-                            _d = false;
-                            const [componentName, component] = _c;
-                            // component might be undefined if this component has no registries
-                            const componentRegistry = component ? component[registry] : undefined;
-                            if (componentRegistry !== undefined) {
-                                for (const name in componentRegistry) {
-                                    if (componentName === "core") {
-                                        yield yield __await([name, componentRegistry[name]]);
-                                    }
-                                    else {
-                                        yield yield __await([
-                                            componentName.split(".").reverse().join(".") + "." + name,
-                                            componentRegistry[name],
-                                        ]);
-                                    }
-                                }
+            catch (e_2_1) { e_2 = { error: e_2_1 }; }
+            finally {
+                try {
+                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+                }
+                finally { if (e_2) throw e_2.error; }
+            }
+            return undefined;
+        });
+    }
+    getConfigVarComplete(schema, key) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var cv = Object.assign({}, schema.config_vars[key]);
+            const appendCvs = (s, c) => __awaiter(this, void 0, void 0, function* () {
+                if (s.extends !== undefined) {
+                    for (const extended of s.extends) {
+                        const s_cv = yield this.getExtendedConfigVar(extended);
+                        if (s_cv.type === "schema") {
+                            if (s_cv.schema.config_vars !== undefined &&
+                                key in s_cv.schema.config_vars) {
+                                c = Object.assign(Object.assign({}, s_cv.schema.config_vars[key]), c);
                             }
+                            c = yield appendCvs(s_cv.schema, c);
                         }
                     }
-                    catch (e_1_1) { e_1 = { error: e_1_1 }; }
-                    finally {
-                        try {
-                            if (!_d && !_a && (_b = _e.return)) yield __await(_b.call(_e));
+                }
+                return c;
+            });
+            cv = yield appendCvs(schema, cv);
+            return yield this.getConfigVarComplete2(cv);
+        });
+    }
+    getConfigVarComplete2(cv) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (cv.type !== "schema" || cv.schema.extends === undefined) {
+                return cv;
+            }
+            let mergedConfigVars = Object.assign({}, cv.schema.config_vars);
+            let maybe = cv.maybe;
+            for (const extended of cv.schema.extends) {
+                const s_cv = yield this.getExtendedConfigVar(extended);
+                if (s_cv.type === "schema") {
+                    const completedExtended = yield this.getConfigVarComplete2(s_cv);
+                    if (completedExtended.type === "schema") {
+                        mergedConfigVars = Object.assign(Object.assign({}, completedExtended.schema.config_vars), mergedConfigVars);
+                        if (maybe === undefined) {
+                            maybe = completedExtended.maybe;
                         }
-                        finally { if (e_1) throw e_1.error; }
                     }
+                }
+            }
+            return Object.assign(Object.assign({}, cv), { maybe, schema: {
+                    config_vars: mergedConfigVars,
+                    extends: [],
+                } });
+        });
+    }
+    /**
+     * Iterate a domain-specific registry (registry must contain ".").
+     * E.g. "sensor.filter" yields all sensor filters.
+     */
+    getDomainRegistry(domainRegistry) {
+        return __asyncGenerator(this, arguments, function* getDomainRegistry_1() {
+            const [domain, registryName] = domainRegistry.split(".");
+            if (this.isRegistry(registryName)) {
+                const schemaSet = yield __await(this.getSchema());
+                const domainData = schemaSet[domain];
+                if (domainData && domainData[registryName]) {
+                    for (const name in domainData[registryName]) {
+                        yield yield __await([name, domainData[registryName][name]]);
+                    }
+                }
             }
         });
     }
     getRegistryConfigVar(registry, entry) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b, _c;
             if (registry.includes(".")) {
                 const [domain, registryName] = registry.split(".");
                 if (this.isRegistry(registryName))
@@ -25995,12 +26145,9 @@ class ESPHomeSchema {
                             return (yield this.getComponent(domain))[registry][actionName];
                         }
                     }
-                    for (const c in this.schema) {
-                        const schema = yield this.getComponent(c);
-                        if (schema[registry] !== undefined &&
-                            schema[registry][entry] !== undefined) {
-                            return schema[registry][entry];
-                        }
+                    if (((_a = this.schema) === null || _a === void 0 ? void 0 : _a.core[registry]) !== undefined &&
+                        ((_b = this.schema) === null || _b === void 0 ? void 0 : _b.core[registry][entry]) !== undefined) {
+                        return (_c = this.schema) === null || _c === void 0 ? void 0 : _c.core[registry][entry];
                     }
                 }
             }
@@ -26031,334 +26178,6 @@ class ESPHomeSchema {
             return (yield this.getSchema()).core.pins;
         });
     }
-    getConfigVarComplete(schema, key) {
-        return __awaiter(this, void 0, void 0, function* () {
-            var cv = Object.assign({}, schema.config_vars[key]);
-            const appendCvs = (s, c) => __awaiter(this, void 0, void 0, function* () {
-                if (s.extends !== undefined) {
-                    for (const extended of s.extends) {
-                        const s_cv = yield this.getExtendedConfigVar(extended);
-                        if (s_cv.type === "schema") {
-                            if (s_cv.schema.config_vars !== undefined &&
-                                key in s_cv.schema.config_vars) {
-                                c = Object.assign(Object.assign({}, s_cv.schema.config_vars[key]), c);
-                            }
-                            c = yield appendCvs(s_cv.schema, c);
-                        }
-                    }
-                }
-                return c;
-            });
-            cv = yield appendCvs(schema, cv);
-            return yield this.getConfigVarComplete2(cv);
-        });
-    }
-    getConfigVarComplete2(cv) {
-        return __awaiter(this, void 0, void 0, function* () {
-            var ret = Object.assign({}, cv);
-            if (cv.type === "schema" && cv.schema.extends !== undefined) {
-                for (const extended of cv.schema.extends) {
-                    const s_cv = yield this.getExtendedConfigVar(extended);
-                    ret = Object.assign(Object.assign({}, s_cv), ret);
-                    ret.type = s_cv.type;
-                }
-            }
-            return ret;
-        });
-    }
-    iterConfigVars(schema_1, doc_1) {
-        return __asyncGenerator(this, arguments, function* iterConfigVars_1(schema, doc, yielded = []) {
-            var _a, e_2, _b, _c;
-            var _d;
-            const docMap = doc.contents;
-            for (var prop in schema.config_vars) {
-                if (((_d = schema.extends) === null || _d === void 0 ? void 0 : _d.includes("core.MQTT_COMPONENT_SCHEMA")) &&
-                    (prop === "mqtt_id" || prop === "expire_after") &&
-                    docMap.get("mqtt") === undefined) {
-                    // filter mqtt props if mqtt is not used
-                    continue;
-                }
-                if (yielded.includes(prop)) {
-                    continue;
-                }
-                yielded.push(prop);
-                yield yield __await([prop, yield __await(this.getConfigVarComplete(schema, prop))]);
-            }
-            if (schema.extends !== undefined) {
-                for (var extended of schema.extends) {
-                    if (extended.startsWith("core.MQTT") &&
-                        docMap.get("mqtt") === undefined) {
-                        continue;
-                    }
-                    const s = yield __await(this.getExtendedConfigVar(extended));
-                    if (s.type === "schema") {
-                        try {
-                            for (var _e = true, _f = (e_2 = void 0, __asyncValues(this.iterConfigVars(s.schema, doc, yielded))), _g; _g = yield __await(_f.next()), _a = _g.done, !_a; _e = true) {
-                                _c = _g.value;
-                                _e = false;
-                                const pair = _c;
-                                yield yield __await(pair);
-                            }
-                        }
-                        catch (e_2_1) { e_2 = { error: e_2_1 }; }
-                        finally {
-                            try {
-                                if (!_e && !_a && (_b = _f.return)) yield __await(_b.call(_f));
-                            }
-                            finally { if (e_2) throw e_2.error; }
-                        }
-                    }
-                    else if (s.type === "typed") {
-                        yield yield __await([s.typed_key, s]);
-                    }
-                }
-            }
-        });
-    }
-    findConfigVar(schema, prop, doc) {
-        return __awaiter(this, void 0, void 0, function* () {
-            var _a, e_3, _b, _c;
-            try {
-                for (var _d = true, _e = __asyncValues(this.iterConfigVars(schema, doc)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
-                    _c = _f.value;
-                    _d = false;
-                    const [p, config] = _c;
-                    if (p === prop) {
-                        return config;
-                    }
-                }
-            }
-            catch (e_3_1) { e_3 = { error: e_3_1 }; }
-            finally {
-                try {
-                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
-                }
-                finally { if (e_3) throw e_3.error; }
-            }
-            return undefined;
-        });
-    }
-    iterDeclaringIdsInner(idType, map, declaringCv, doc) {
-        return __asyncGenerator(this, arguments, function* iterDeclaringIdsInner_1() {
-            var _a, e_4, _b, _c, _d, e_5, _e, _f;
-            var _g;
-            let schema;
-            if (declaringCv.type === "schema") {
-                schema = declaringCv.schema;
-            }
-            else if (declaringCv.type === "typed") {
-                const schemaType = map.get(declaringCv.typed_key);
-                schema = declaringCv.types[schemaType];
-            }
-            else {
-                return yield __await(void 0);
-            }
-            for (const k of map.items) {
-                if ((0, yaml_1.isPair)(k) && (0, yaml_1.isScalar)(k.key)) {
-                    const propName = k.key.value;
-                    const cv = yield __await(this.findConfigVar(schema, propName, doc));
-                    if (cv) {
-                        const idCv = cv;
-                        if (idCv.id_type &&
-                            (idCv.id_type.class === idType ||
-                                ((_g = idCv.id_type.parents) === null || _g === void 0 ? void 0 : _g.includes(idType)))) {
-                            yield yield __await(k.value);
-                        }
-                        if ((0, yaml_1.isMap)(k.value)) {
-                            try {
-                                for (var _h = true, _j = (e_4 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, k.value, cv, doc))), _k; _k = yield __await(_j.next()), _a = _k.done, !_a; _h = true) {
-                                    _c = _k.value;
-                                    _h = false;
-                                    const yieldNode = _c;
-                                    yield yield __await(yieldNode);
-                                }
-                            }
-                            catch (e_4_1) { e_4 = { error: e_4_1 }; }
-                            finally {
-                                try {
-                                    if (!_h && !_a && (_b = _j.return)) yield __await(_b.call(_j));
-                                }
-                                finally { if (e_4) throw e_4.error; }
-                            }
-                        }
-                        else if (cv.is_list && (0, yaml_1.isSeq)(k.value)) {
-                            for (const seqItem of k.value.items) {
-                                if ((0, yaml_1.isMap)(seqItem)) {
-                                    try {
-                                        for (var _l = true, _m = (e_5 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, seqItem, cv, doc))), _o; _o = yield __await(_m.next()), _d = _o.done, !_d; _l = true) {
-                                            _f = _o.value;
-                                            _l = false;
-                                            const yieldNode = _f;
-                                            yield yield __await(yieldNode);
-                                        }
-                                    }
-                                    catch (e_5_1) { e_5 = { error: e_5_1 }; }
-                                    finally {
-                                        try {
-                                            if (!_l && !_d && (_e = _m.return)) yield __await(_e.call(_m));
-                                        }
-                                        finally { if (e_5) throw e_5.error; }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-    iterDeclaringIds(idType, doc) {
-        return __asyncGenerator(this, arguments, function* iterDeclaringIds_1() {
-            var _a, e_6, _b, _c, _d, e_7, _e, _f, _g, e_8, _h, _j, _k, e_9, _l, _m;
-            const docMap = doc.contents;
-            for (const k of docMap.items) {
-                if ((0, yaml_1.isPair)(k) && (0, yaml_1.isScalar)(k.key)) {
-                    const componentName = k.key.value;
-                    if (componentName in (yield __await(this.getSchema())).core.components ||
-                        (yield __await(this.isPlatform(componentName)))) {
-                        const component = yield __await(this.getComponent(componentName));
-                        const cv = component.schemas.CONFIG_SCHEMA;
-                        if ((0, yaml_1.isMap)(k.value) && (0, yaml_1.isScalar)(k.value.get("id", true)) && cv) {
-                            try {
-                                for (var _o = true, _p = (e_6 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, k.value, cv, doc))), _q; _q = yield __await(_p.next()), _a = _q.done, !_a; _o = true) {
-                                    _c = _q.value;
-                                    _o = false;
-                                    const yieldNode = _c;
-                                    yield yield __await(yieldNode);
-                                }
-                            }
-                            catch (e_6_1) { e_6 = { error: e_6_1 }; }
-                            finally {
-                                try {
-                                    if (!_o && !_a && (_b = _p.return)) yield __await(_b.call(_p));
-                                }
-                                finally { if (e_6) throw e_6.error; }
-                            }
-                        }
-                        else if ((0, yaml_1.isSeq)(k.value) && cv && cv.is_list) {
-                            const nodeList = k.value;
-                            for (const item of nodeList.items) {
-                                if ((0, yaml_1.isMap)(item) && (0, yaml_1.isScalar)(item.get("id", true)) && cv) {
-                                    try {
-                                        for (var _r = true, _s = (e_7 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, item, cv, doc))), _t; _t = yield __await(_s.next()), _d = _t.done, !_d; _r = true) {
-                                            _f = _t.value;
-                                            _r = false;
-                                            const yieldNode = _f;
-                                            yield yield __await(yieldNode);
-                                        }
-                                    }
-                                    catch (e_7_1) { e_7 = { error: e_7_1 }; }
-                                    finally {
-                                        try {
-                                            if (!_r && !_d && (_e = _s.return)) yield __await(_e.call(_s));
-                                        }
-                                        finally { if (e_7) throw e_7.error; }
-                                    }
-                                }
-                            }
-                        }
-                        if (yield __await(this.isPlatform(componentName))) {
-                            // iterate elements and lookup platform to load components
-                            const platNode = k.value;
-                            if ((0, yaml_1.isSeq)(platNode)) {
-                                for (const seqItemNode of platNode.items) {
-                                    if ((0, yaml_1.isMap)(seqItemNode)) {
-                                        const platCompName = seqItemNode.get("platform");
-                                        if (platCompName in component.components) {
-                                            const component = yield __await(this.getComponent(platCompName, componentName));
-                                            const platCv = component.schemas.CONFIG_SCHEMA;
-                                            try {
-                                                for (var _u = true, _v = (e_8 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, seqItemNode, platCv, doc))), _w; _w = yield __await(_v.next()), _g = _w.done, !_g; _u = true) {
-                                                    _j = _w.value;
-                                                    _u = false;
-                                                    const yieldNode = _j;
-                                                    yield yield __await(yieldNode);
-                                                }
-                                            }
-                                            catch (e_8_1) { e_8 = { error: e_8_1 }; }
-                                            finally {
-                                                try {
-                                                    if (!_u && !_g && (_h = _v.return)) yield __await(_h.call(_v));
-                                                }
-                                                finally { if (e_8) throw e_8.error; }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            else if ((0, yaml_1.isMap)(platNode)) {
-                                const platCompName = platNode.get("platform");
-                                if (platCompName in component.components) {
-                                    const component = yield __await(this.getComponent(platCompName, componentName));
-                                    const platCv = component.schemas.CONFIG_SCHEMA;
-                                    try {
-                                        for (var _x = true, _y = (e_9 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, platNode, platCv, doc))), _z; _z = yield __await(_y.next()), _k = _z.done, !_k; _x = true) {
-                                            _m = _z.value;
-                                            _x = false;
-                                            const yieldNode = _m;
-                                            yield yield __await(yieldNode);
-                                        }
-                                    }
-                                    catch (e_9_1) { e_9 = { error: e_9_1 }; }
-                                    finally {
-                                        try {
-                                            if (!_x && !_k && (_l = _y.return)) yield __await(_l.call(_y));
-                                        }
-                                        finally { if (e_9) throw e_9.error; }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-    findComponentDefinition(id_type, id, doc) {
-        return __awaiter(this, void 0, void 0, function* () {
-            var _a, e_10, _b, _c;
-            try {
-                for (var _d = true, _e = __asyncValues(this.iterDeclaringIds(id_type, doc)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
-                    _c = _f.value;
-                    _d = false;
-                    const item = _c;
-                    if ((0, yaml_1.isScalar)(item) && item.value === id) {
-                        return item.range;
-                    }
-                }
-            }
-            catch (e_10_1) { e_10 = { error: e_10_1 }; }
-            finally {
-                try {
-                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
-                }
-                finally { if (e_10) throw e_10.error; }
-            }
-            return null;
-        });
-    }
-    getUsableIds(use_id_type, doc) {
-        return __awaiter(this, void 0, void 0, function* () {
-            var _a, e_11, _b, _c;
-            const ret = [];
-            try {
-                for (var _d = true, _e = __asyncValues(this.iterDeclaringIds(use_id_type, doc)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
-                    _c = _f.value;
-                    _d = false;
-                    const item = _c;
-                    ret.push(item.toString());
-                }
-            }
-            catch (e_11_1) { e_11 = { error: e_11_1 }; }
-            finally {
-                try {
-                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
-                }
-                finally { if (e_11) throw e_11.error; }
-            }
-            return ret;
-        });
-    }
 }
 exports.ESPHomeSchema = ESPHomeSchema;
 
@@ -26382,7 +26201,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ensureSchemaAvailable = ensureSchemaAvailable;
 const path = __webpack_require__(25);
 const unzipper = __webpack_require__(190);
-const https = __webpack_require__(91);
+const https = __webpack_require__(92);
 const os = __webpack_require__(26);
 const fs = __webpack_require__(76);
 const connection_source_1 = __webpack_require__(86);
@@ -26495,15 +26314,15 @@ function ensureSchemaAvailable() {
 exports.Parse = __webpack_require__(191);
 exports.ParseOne = __webpack_require__(198);
 exports.Extract = __webpack_require__(218);
-exports.Open = __webpack_require__(255);
+exports.Open = __webpack_require__(256);
 
 /***/ }),
 /* 191 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 const util = __webpack_require__(10);
-const zlib = __webpack_require__(96);
-const Stream = __webpack_require__(94);
+const zlib = __webpack_require__(97);
+const Stream = __webpack_require__(95);
 const PullStream = __webpack_require__(192);
 const NoopStream = __webpack_require__(193);
 const BufferStream = __webpack_require__(194);
@@ -26795,7 +26614,7 @@ module.exports = Parse;
 /* 192 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
-const Stream = __webpack_require__(94);
+const Stream = __webpack_require__(95);
 const util = __webpack_require__(10);
 const strFunction = 'function';
 
@@ -26940,7 +26759,7 @@ module.exports = PullStream;
 /* 193 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
-const Stream = __webpack_require__(94);
+const Stream = __webpack_require__(95);
 const util = __webpack_require__(10);
 function NoopStream() {
   if (!(this instanceof NoopStream)) {
@@ -26959,7 +26778,7 @@ module.exports = NoopStream;
 /* 194 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
-const Stream = __webpack_require__(94);
+const Stream = __webpack_require__(95);
 
 module.exports = function(entry) {
   return new Promise(function(resolve, reject) {
@@ -27108,7 +26927,7 @@ module.exports = function parseDateTime(date, time) {
 /* 198 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
-const Stream = __webpack_require__(94);
+const Stream = __webpack_require__(95);
 const Parse = __webpack_require__(191);
 const duplexer2 = __webpack_require__(199);
 const BufferStream = __webpack_require__(194);
@@ -27251,7 +27070,7 @@ module.exports.DuplexWrapper = DuplexWrapper;
 /* 200 */
 /***/ ((module, exports, __webpack_require__) => {
 
-var Stream = __webpack_require__(94);
+var Stream = __webpack_require__(95);
 if (process.env.READABLE_STREAM === 'disable' && Stream) {
   module.exports = Stream;
   exports = module.exports = Stream.Readable;
@@ -27318,7 +27137,7 @@ var Duplex;
 Readable.ReadableState = ReadableState;
 
 /*<replacement>*/
-var EE = (__webpack_require__(90).EventEmitter);
+var EE = (__webpack_require__(91).EventEmitter);
 
 var EElistenerCount = function (emitter, type) {
   return emitter.listeners(type).length;
@@ -28364,7 +28183,7 @@ module.exports = Array.isArray || function (arr) {
 /* 204 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
-module.exports = __webpack_require__(94);
+module.exports = __webpack_require__(95);
 
 
 /***/ }),
@@ -28372,7 +28191,7 @@ module.exports = __webpack_require__(94);
 /***/ ((module, exports, __webpack_require__) => {
 
 /* eslint-disable node/no-deprecated-api */
-var buffer = __webpack_require__(103)
+var buffer = __webpack_require__(104)
 var Buffer = buffer.Buffer
 
 // alternative to using Object.keys for old browsers
@@ -28541,7 +28360,7 @@ function isPrimitive(arg) {
 }
 exports.isPrimitive = isPrimitive;
 
-exports.isBuffer = __webpack_require__(103).Buffer.isBuffer;
+exports.isBuffer = __webpack_require__(104).Buffer.isBuffer;
 
 function objectToString(o) {
   return Object.prototype.toString.call(o);
@@ -29917,7 +29736,7 @@ function simpleEnd(buf) {
 /***/ ((module, exports, __webpack_require__) => {
 
 /* eslint-disable node/no-deprecated-api */
-var buffer = __webpack_require__(103)
+var buffer = __webpack_require__(104)
 var Buffer = buffer.Buffer
 
 // alternative to using Object.keys for old browsers
@@ -30262,7 +30081,7 @@ module.exports = Extract;
 const Parse = __webpack_require__(191);
 const fs = __webpack_require__(219);
 const path = __webpack_require__(25);
-const stream = __webpack_require__(94);
+const stream = __webpack_require__(95);
 const duplexer2 = __webpack_require__(199);
 
 function Extract (opts) {
@@ -30333,14 +30152,14 @@ module.exports = {
   ...__webpack_require__(220),
   // Export extra methods:
   ...__webpack_require__(228),
-  ...__webpack_require__(237),
-  ...__webpack_require__(239),
-  ...__webpack_require__(245),
+  ...__webpack_require__(238),
+  ...__webpack_require__(240),
+  ...__webpack_require__(246),
   ...__webpack_require__(230),
-  ...__webpack_require__(252),
-  ...__webpack_require__(250),
+  ...__webpack_require__(253),
+  ...__webpack_require__(251),
   ...__webpack_require__(233),
-  ...__webpack_require__(238)
+  ...__webpack_require__(239)
 }
 
 
@@ -31354,7 +31173,7 @@ module.exports = require("constants");
 /* 225 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
-var Stream = (__webpack_require__(94).Stream)
+var Stream = (__webpack_require__(95).Stream)
 
 module.exports = legacy
 
@@ -31521,7 +31340,7 @@ module.exports = require("assert");
 const u = (__webpack_require__(221).fromPromise)
 module.exports = {
   copy: u(__webpack_require__(229)),
-  copySync: __webpack_require__(236)
+  copySync: __webpack_require__(237)
 }
 
 
@@ -31538,6 +31357,7 @@ const { mkdirs } = __webpack_require__(230)
 const { pathExists } = __webpack_require__(233)
 const { utimesMillis } = __webpack_require__(234)
 const stat = __webpack_require__(235)
+const { asyncIteratorConcurrentProcess } = __webpack_require__(236)
 
 async function copy (src, dest, opts = {}) {
   if (typeof opts === 'function') {
@@ -31645,28 +31465,20 @@ async function onDir (srcStat, destStat, src, dest, opts) {
     await fs.mkdir(dest)
   }
 
-  const promises = []
-
-  // loop through the files in the current directory to copy everything
-  for await (const item of await fs.opendir(src)) {
+  // iterate through the files in the current directory to copy everything
+  await asyncIteratorConcurrentProcess(await fs.opendir(src), async (item) => {
     const srcItem = path.join(src, item.name)
     const destItem = path.join(dest, item.name)
 
-    promises.push(
-      runFilter(srcItem, destItem, opts).then(include => {
-        if (include) {
-          // only copy the item if it matches the filter function
-          return stat.checkPaths(srcItem, destItem, 'copy', opts).then(({ destStat }) => {
-            // If the item is a copyable file, `getStatsAndPerformCopy` will copy it
-            // If the item is a directory, `getStatsAndPerformCopy` will call `onDir` recursively
-            return getStatsAndPerformCopy(destStat, srcItem, destItem, opts)
-          })
-        }
-      })
-    )
-  }
-
-  await Promise.all(promises)
+    const include = await runFilter(srcItem, destItem, opts)
+    // only copy the item if it matches the filter function
+    if (include) {
+      const { destStat } = await stat.checkPaths(srcItem, destItem, 'copy', opts)
+      // If the item is a copyable file, `getStatsAndPerformCopy` will copy it
+      // If the item is a directory, `getStatsAndPerformCopy` will call `onDir` recursively
+      await getStatsAndPerformCopy(destStat, srcItem, destItem, opts)
+    }
+  })
 
   if (!destStat) {
     await fs.chmod(dest, srcStat.mode)
@@ -31695,15 +31507,20 @@ async function onLink (destStat, src, dest, opts) {
   if (opts.dereference) {
     resolvedDest = path.resolve(process.cwd(), resolvedDest)
   }
-  if (stat.isSrcSubdir(resolvedSrc, resolvedDest)) {
-    throw new Error(`Cannot copy '${resolvedSrc}' to a subdirectory of itself, '${resolvedDest}'.`)
-  }
+  // If both symlinks resolve to the same target, they are still distinct symlinks
+  // that can be copied/overwritten. Only check subdirectory constraints when
+  // the resolved paths are different.
+  if (resolvedSrc !== resolvedDest) {
+    if (stat.isSrcSubdir(resolvedSrc, resolvedDest)) {
+      throw new Error(`Cannot copy '${resolvedSrc}' to a subdirectory of itself, '${resolvedDest}'.`)
+    }
 
-  // do not copy if src is a subdir of dest since unlinking
-  // dest in this case would result in removing src contents
-  // and therefore a broken symlink would be created.
-  if (stat.isSrcSubdir(resolvedDest, resolvedSrc)) {
-    throw new Error(`Cannot overwrite '${resolvedDest}' with '${resolvedSrc}'.`)
+    // do not copy if src is a subdir of dest since unlinking
+    // dest in this case would result in removing src contents
+    // and therefore a broken symlink would be created.
+    if (stat.isSrcSubdir(resolvedDest, resolvedSrc)) {
+      throw new Error(`Cannot overwrite '${resolvedDest}' with '${resolvedSrc}'.`)
+    }
   }
 
   // copy the link
@@ -31996,7 +31813,8 @@ function checkParentPathsSync (src, srcStat, dest, funcName) {
 }
 
 function areIdentical (srcStat, destStat) {
-  return destStat.ino && destStat.dev && destStat.ino === srcStat.ino && destStat.dev === srcStat.dev
+  // stat.dev can be 0n on windows when node version >= 22.x.x
+  return destStat.ino !== undefined && destStat.dev !== undefined && destStat.ino === srcStat.ino && destStat.dev === srcStat.dev
 }
 
 // return true if dest is a subdir of src, otherwise false.
@@ -32026,6 +31844,42 @@ module.exports = {
 
 /***/ }),
 /* 236 */
+/***/ ((module) => {
+
+"use strict";
+
+
+// https://github.com/jprichardson/node-fs-extra/issues/1056
+// Performing parallel operations on each item of an async iterator is
+// surprisingly hard; you need to have handlers in place to avoid getting an
+// UnhandledPromiseRejectionWarning.
+// NOTE: This function does not presently handle return values, only errors
+async function asyncIteratorConcurrentProcess (iterator, fn) {
+  const promises = []
+  for await (const item of iterator) {
+    promises.push(
+      fn(item).then(
+        () => null,
+        (err) => err ?? new Error('unknown error')
+      )
+    )
+  }
+  await Promise.all(
+    promises.map((promise) =>
+      promise.then((possibleErr) => {
+        if (possibleErr !== null) throw possibleErr
+      })
+    )
+  )
+}
+
+module.exports = {
+  asyncIteratorConcurrentProcess
+}
+
+
+/***/ }),
+/* 237 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32180,15 +32034,20 @@ function onLink (destStat, src, dest, opts) {
     if (opts.dereference) {
       resolvedDest = path.resolve(process.cwd(), resolvedDest)
     }
-    if (stat.isSrcSubdir(resolvedSrc, resolvedDest)) {
-      throw new Error(`Cannot copy '${resolvedSrc}' to a subdirectory of itself, '${resolvedDest}'.`)
-    }
+    // If both symlinks resolve to the same target, they are still distinct symlinks
+    // that can be copied/overwritten. Only check subdirectory constraints when
+    // the resolved paths are different.
+    if (resolvedSrc !== resolvedDest) {
+      if (stat.isSrcSubdir(resolvedSrc, resolvedDest)) {
+        throw new Error(`Cannot copy '${resolvedSrc}' to a subdirectory of itself, '${resolvedDest}'.`)
+      }
 
-    // prevent copy if src is a subdir of dest since unlinking
-    // dest in this case would result in removing src contents
-    // and therefore a broken symlink would be created.
-    if (stat.isSrcSubdir(resolvedDest, resolvedSrc)) {
-      throw new Error(`Cannot overwrite '${resolvedDest}' with '${resolvedSrc}'.`)
+      // prevent copy if src is a subdir of dest since unlinking
+      // dest in this case would result in removing src contents
+      // and therefore a broken symlink would be created.
+      if (stat.isSrcSubdir(resolvedDest, resolvedSrc)) {
+        throw new Error(`Cannot overwrite '${resolvedDest}' with '${resolvedSrc}'.`)
+      }
     }
     return copyLink(resolvedSrc, dest)
   }
@@ -32203,7 +32062,7 @@ module.exports = copySync
 
 
 /***/ }),
-/* 237 */
+/* 238 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32213,7 +32072,7 @@ const u = (__webpack_require__(221).fromPromise)
 const fs = __webpack_require__(220)
 const path = __webpack_require__(25)
 const mkdir = __webpack_require__(230)
-const remove = __webpack_require__(238)
+const remove = __webpack_require__(239)
 
 const emptyDir = u(async function emptyDir (dir) {
   let items
@@ -32249,7 +32108,7 @@ module.exports = {
 
 
 /***/ }),
-/* 238 */
+/* 239 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32273,15 +32132,15 @@ module.exports = {
 
 
 /***/ }),
-/* 239 */
+/* 240 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const { createFile, createFileSync } = __webpack_require__(240)
-const { createLink, createLinkSync } = __webpack_require__(241)
-const { createSymlink, createSymlinkSync } = __webpack_require__(242)
+const { createFile, createFileSync } = __webpack_require__(241)
+const { createLink, createLinkSync } = __webpack_require__(242)
+const { createSymlink, createSymlinkSync } = __webpack_require__(243)
 
 module.exports = {
   // file
@@ -32303,7 +32162,7 @@ module.exports = {
 
 
 /***/ }),
-/* 240 */
+/* 241 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32376,7 +32235,7 @@ module.exports = {
 
 
 /***/ }),
-/* 241 */
+/* 242 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32447,7 +32306,7 @@ module.exports = {
 
 
 /***/ }),
-/* 242 */
+/* 243 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32459,8 +32318,8 @@ const fs = __webpack_require__(220)
 
 const { mkdirs, mkdirsSync } = __webpack_require__(230)
 
-const { symlinkPaths, symlinkPathsSync } = __webpack_require__(243)
-const { symlinkType, symlinkTypeSync } = __webpack_require__(244)
+const { symlinkPaths, symlinkPathsSync } = __webpack_require__(244)
+const { symlinkType, symlinkTypeSync } = __webpack_require__(245)
 
 const { pathExists } = __webpack_require__(233)
 
@@ -32473,11 +32332,22 @@ async function createSymlink (srcpath, dstpath, type) {
   } catch { }
 
   if (stats && stats.isSymbolicLink()) {
-    const [srcStat, dstStat] = await Promise.all([
-      fs.stat(srcpath),
-      fs.stat(dstpath)
-    ])
+    // When srcpath is relative, resolve it relative to dstpath's directory
+    // (standard symlink behavior) or fall back to cwd if that doesn't exist
+    let srcStat
+    if (path.isAbsolute(srcpath)) {
+      srcStat = await fs.stat(srcpath)
+    } else {
+      const dstdir = path.dirname(dstpath)
+      const relativeToDst = path.join(dstdir, srcpath)
+      try {
+        srcStat = await fs.stat(relativeToDst)
+      } catch {
+        srcStat = await fs.stat(srcpath)
+      }
+    }
 
+    const dstStat = await fs.stat(dstpath)
     if (areIdentical(srcStat, dstStat)) return
   }
 
@@ -32499,7 +32369,21 @@ function createSymlinkSync (srcpath, dstpath, type) {
     stats = fs.lstatSync(dstpath)
   } catch { }
   if (stats && stats.isSymbolicLink()) {
-    const srcStat = fs.statSync(srcpath)
+    // When srcpath is relative, resolve it relative to dstpath's directory
+    // (standard symlink behavior) or fall back to cwd if that doesn't exist
+    let srcStat
+    if (path.isAbsolute(srcpath)) {
+      srcStat = fs.statSync(srcpath)
+    } else {
+      const dstdir = path.dirname(dstpath)
+      const relativeToDst = path.join(dstdir, srcpath)
+      try {
+        srcStat = fs.statSync(relativeToDst)
+      } catch {
+        srcStat = fs.statSync(srcpath)
+      }
+    }
+
     const dstStat = fs.statSync(dstpath)
     if (areIdentical(srcStat, dstStat)) return
   }
@@ -32521,7 +32405,7 @@ module.exports = {
 
 
 /***/ }),
-/* 243 */
+/* 244 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32629,7 +32513,7 @@ module.exports = {
 
 
 /***/ }),
-/* 244 */
+/* 245 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32670,17 +32554,17 @@ module.exports = {
 
 
 /***/ }),
-/* 245 */
+/* 246 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
 const u = (__webpack_require__(221).fromPromise)
-const jsonFile = __webpack_require__(246)
+const jsonFile = __webpack_require__(247)
 
-jsonFile.outputJson = u(__webpack_require__(249))
-jsonFile.outputJsonSync = __webpack_require__(251)
+jsonFile.outputJson = u(__webpack_require__(250))
+jsonFile.outputJsonSync = __webpack_require__(252)
 // aliases
 jsonFile.outputJSON = jsonFile.outputJson
 jsonFile.outputJSONSync = jsonFile.outputJsonSync
@@ -32693,13 +32577,13 @@ module.exports = jsonFile
 
 
 /***/ }),
-/* 246 */
+/* 247 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const jsonFile = __webpack_require__(247)
+const jsonFile = __webpack_require__(248)
 
 module.exports = {
   // jsonfile exports
@@ -32711,7 +32595,7 @@ module.exports = {
 
 
 /***/ }),
-/* 247 */
+/* 248 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 let _fs
@@ -32721,7 +32605,7 @@ try {
   _fs = __webpack_require__(76)
 }
 const universalify = __webpack_require__(221)
-const { stringify, stripBom } = __webpack_require__(248)
+const { stringify, stripBom } = __webpack_require__(249)
 
 async function _readFile (file, options = {}) {
   if (typeof options === 'string') {
@@ -32794,18 +32678,18 @@ function writeFileSync (file, obj, options = {}) {
   return fs.writeFileSync(file, str, options)
 }
 
-const jsonfile = {
+// NOTE: do not change this export format; required for ESM compat
+// see https://github.com/jprichardson/node-jsonfile/pull/162 for details
+module.exports = {
   readFile,
   readFileSync,
   writeFile,
   writeFileSync
 }
 
-module.exports = jsonfile
-
 
 /***/ }),
-/* 248 */
+/* 249 */
 /***/ ((module) => {
 
 function stringify (obj, { EOL = '\n', finalEOL = true, replacer = null, spaces } = {}) {
@@ -32825,14 +32709,14 @@ module.exports = { stringify, stripBom }
 
 
 /***/ }),
-/* 249 */
+/* 250 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const { stringify } = __webpack_require__(248)
-const { outputFile } = __webpack_require__(250)
+const { stringify } = __webpack_require__(249)
+const { outputFile } = __webpack_require__(251)
 
 async function outputJson (file, data, options = {}) {
   const str = stringify(data, options)
@@ -32844,7 +32728,7 @@ module.exports = outputJson
 
 
 /***/ }),
-/* 250 */
+/* 251 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32882,14 +32766,14 @@ module.exports = {
 
 
 /***/ }),
-/* 251 */
+/* 252 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
-const { stringify } = __webpack_require__(248)
-const { outputFileSync } = __webpack_require__(250)
+const { stringify } = __webpack_require__(249)
+const { outputFileSync } = __webpack_require__(251)
 
 function outputJsonSync (file, data, options) {
   const str = stringify(data, options)
@@ -32901,7 +32785,7 @@ module.exports = outputJsonSync
 
 
 /***/ }),
-/* 252 */
+/* 253 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32909,13 +32793,13 @@ module.exports = outputJsonSync
 
 const u = (__webpack_require__(221).fromPromise)
 module.exports = {
-  move: u(__webpack_require__(253)),
-  moveSync: __webpack_require__(254)
+  move: u(__webpack_require__(254)),
+  moveSync: __webpack_require__(255)
 }
 
 
 /***/ }),
-/* 253 */
+/* 254 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32924,7 +32808,7 @@ module.exports = {
 const fs = __webpack_require__(220)
 const path = __webpack_require__(25)
 const { copy } = __webpack_require__(228)
-const { remove } = __webpack_require__(238)
+const { remove } = __webpack_require__(239)
 const { mkdirp } = __webpack_require__(230)
 const { pathExists } = __webpack_require__(233)
 const stat = __webpack_require__(235)
@@ -32981,7 +32865,7 @@ module.exports = move
 
 
 /***/ }),
-/* 254 */
+/* 255 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -32990,7 +32874,7 @@ module.exports = move
 const fs = __webpack_require__(222)
 const path = __webpack_require__(25)
 const copySync = (__webpack_require__(228).copySync)
-const removeSync = (__webpack_require__(238).removeSync)
+const removeSync = (__webpack_require__(239).removeSync)
 const mkdirpSync = (__webpack_require__(230).mkdirpSync)
 const stat = __webpack_require__(235)
 
@@ -33043,12 +32927,12 @@ module.exports = moveSync
 
 
 /***/ }),
-/* 255 */
+/* 256 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 const fs = __webpack_require__(222);
-const directory = __webpack_require__(256);
-const Stream = __webpack_require__(94);
+const directory = __webpack_require__(257);
+const Stream = __webpack_require__(95);
 
 module.exports = {
   buffer: function(buffer, options) {
@@ -33143,7 +33027,7 @@ module.exports = {
   },
   s3_v3: function (client, params, options) {
     //@ts-ignore
-    const { GetObjectCommand, HeadObjectCommand } = __webpack_require__(297);
+    const { GetObjectCommand, HeadObjectCommand } = __webpack_require__(298);
     const source = {
       size: async () => {
         const head = await client.send(
@@ -33190,18 +33074,18 @@ module.exports = {
 
 
 /***/ }),
-/* 256 */
+/* 257 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 const PullStream = __webpack_require__(192);
-const unzip = __webpack_require__(257);
+const unzip = __webpack_require__(258);
 const BufferStream = __webpack_require__(194);
 const parseExtraField = __webpack_require__(195);
 const path = __webpack_require__(25);
 const fs = __webpack_require__(219);
 const parseDateTime = __webpack_require__(197);
 const parseBuffer = __webpack_require__(196);
-const Bluebird = __webpack_require__(260);
+const Bluebird = __webpack_require__(261);
 
 const signature = Buffer.alloc(4);
 signature.writeUInt32LE(0x06054b50, 0);
@@ -33439,13 +33323,13 @@ module.exports = function centralDirectory(source, options) {
 
 
 /***/ }),
-/* 257 */
+/* 258 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
-const Decrypt = __webpack_require__(258);
+const Decrypt = __webpack_require__(259);
 const PullStream = __webpack_require__(192);
-const Stream = __webpack_require__(94);
-const zlib = __webpack_require__(96);
+const Stream = __webpack_require__(95);
+const zlib = __webpack_require__(97);
 const parseExtraField = __webpack_require__(195);
 const parseDateTime = __webpack_require__(197);
 const parseBuffer = __webpack_require__(196);
@@ -33565,11 +33449,11 @@ module.exports = function unzip(source, offset, _password, directoryVars, length
 
 
 /***/ }),
-/* 258 */
+/* 259 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
-const Int64 = __webpack_require__(259);
-let Stream = __webpack_require__(94);
+const Int64 = __webpack_require__(260);
+let Stream = __webpack_require__(95);
 
 // Backwards compatibility for node versions < 8
 
@@ -33664,7 +33548,7 @@ Decrypt.prototype.stream = function () {
 module.exports = Decrypt;
 
 /***/ }),
-/* 259 */
+/* 260 */
 /***/ ((module) => {
 
 //     Int64.js
@@ -33938,7 +33822,7 @@ Int64.prototype = {
 
 
 /***/ }),
-/* 260 */
+/* 261 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -33950,13 +33834,13 @@ function noConflict() {
     catch (e) {}
     return bluebird;
 }
-var bluebird = __webpack_require__(261)();
+var bluebird = __webpack_require__(262)();
 bluebird.noConflict = noConflict;
 module.exports = bluebird;
 
 
 /***/ }),
-/* 261 */
+/* 262 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -33973,7 +33857,7 @@ var apiRejection = function(msg) {
 };
 function Proxyable() {}
 var UNDEFINED_BINDING = {};
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 util.setReflectHandler(reflectHandler);
 
 var getDomain = function() {
@@ -33993,7 +33877,7 @@ var getContextDomain = function() {
     };
 };
 var AsyncResource = util.isNode && util.nodeSupportsAsyncResource ?
-    (__webpack_require__(264).AsyncResource) : null;
+    (__webpack_require__(265).AsyncResource) : null;
 var getContextAsyncHooks = function() {
     return {
         domain: getDomain(),
@@ -34011,11 +33895,11 @@ var disableAsyncHooks = function() {
     util.notEnumerableProp(Promise, "_getContext", getContextDomain);
 };
 
-var es5 = __webpack_require__(263);
-var Async = __webpack_require__(265);
+var es5 = __webpack_require__(264);
+var Async = __webpack_require__(266);
 var async = new Async();
 es5.defineProperty(Promise, "_async", {value: async});
-var errors = __webpack_require__(268);
+var errors = __webpack_require__(269);
 var TypeError = Promise.TypeError = errors.TypeError;
 Promise.RangeError = errors.RangeError;
 var CancellationError = Promise.CancellationError = errors.CancellationError;
@@ -34026,21 +33910,21 @@ Promise.AggregateError = errors.AggregateError;
 var INTERNAL = function(){};
 var APPLY = {};
 var NEXT_FILTER = {};
-var tryConvertToPromise = __webpack_require__(269)(Promise, INTERNAL);
+var tryConvertToPromise = __webpack_require__(270)(Promise, INTERNAL);
 var PromiseArray =
-    __webpack_require__(270)(Promise, INTERNAL,
+    __webpack_require__(271)(Promise, INTERNAL,
                                tryConvertToPromise, apiRejection, Proxyable);
-var Context = __webpack_require__(271)(Promise);
+var Context = __webpack_require__(272)(Promise);
  /*jshint unused:false*/
 var createContext = Context.create;
 
-var debug = __webpack_require__(272)(Promise, Context,
+var debug = __webpack_require__(273)(Promise, Context,
     enableAsyncHooks, disableAsyncHooks);
 var CapturedTrace = debug.CapturedTrace;
 var PassThroughHandlerContext =
-    __webpack_require__(273)(Promise, tryConvertToPromise, NEXT_FILTER);
-var catchFilter = __webpack_require__(274)(NEXT_FILTER);
-var nodebackForPromise = __webpack_require__(275);
+    __webpack_require__(274)(Promise, tryConvertToPromise, NEXT_FILTER);
+var catchFilter = __webpack_require__(275)(NEXT_FILTER);
+var nodebackForPromise = __webpack_require__(276);
 var errorObj = util.errorObj;
 var tryCatch = util.tryCatch;
 function check(self, executor) {
@@ -34730,31 +34614,31 @@ util.notEnumerableProp(Promise,
                        "_makeSelfResolutionError",
                        makeSelfResolutionError);
 
-__webpack_require__(276)(Promise, INTERNAL, tryConvertToPromise, apiRejection,
+__webpack_require__(277)(Promise, INTERNAL, tryConvertToPromise, apiRejection,
     debug);
-__webpack_require__(277)(Promise, INTERNAL, tryConvertToPromise, debug);
-__webpack_require__(278)(Promise, PromiseArray, apiRejection, debug);
-__webpack_require__(279)(Promise);
+__webpack_require__(278)(Promise, INTERNAL, tryConvertToPromise, debug);
+__webpack_require__(279)(Promise, PromiseArray, apiRejection, debug);
 __webpack_require__(280)(Promise);
-__webpack_require__(281)(
+__webpack_require__(281)(Promise);
+__webpack_require__(282)(
     Promise, PromiseArray, tryConvertToPromise, INTERNAL, async);
 Promise.Promise = Promise;
 Promise.version = "3.7.2";
-__webpack_require__(282)(Promise);
-__webpack_require__(283)(Promise, apiRejection, INTERNAL, tryConvertToPromise, Proxyable, debug);
-__webpack_require__(284)(Promise, PromiseArray, apiRejection, tryConvertToPromise, INTERNAL, debug);
-__webpack_require__(285)(Promise);
-__webpack_require__(286)(Promise, INTERNAL);
-__webpack_require__(287)(Promise, PromiseArray, tryConvertToPromise, apiRejection);
-__webpack_require__(288)(Promise, INTERNAL, tryConvertToPromise, apiRejection);
-__webpack_require__(289)(Promise, PromiseArray, apiRejection, tryConvertToPromise, INTERNAL, debug);
-__webpack_require__(290)(Promise, PromiseArray, debug);
-__webpack_require__(291)(Promise, PromiseArray, apiRejection);
-__webpack_require__(292)(Promise, INTERNAL, debug);
-__webpack_require__(293)(Promise, apiRejection, tryConvertToPromise, createContext, INTERNAL, debug);
-__webpack_require__(294)(Promise);
-__webpack_require__(295)(Promise, INTERNAL);
+__webpack_require__(283)(Promise);
+__webpack_require__(284)(Promise, apiRejection, INTERNAL, tryConvertToPromise, Proxyable, debug);
+__webpack_require__(285)(Promise, PromiseArray, apiRejection, tryConvertToPromise, INTERNAL, debug);
+__webpack_require__(286)(Promise);
+__webpack_require__(287)(Promise, INTERNAL);
+__webpack_require__(288)(Promise, PromiseArray, tryConvertToPromise, apiRejection);
+__webpack_require__(289)(Promise, INTERNAL, tryConvertToPromise, apiRejection);
+__webpack_require__(290)(Promise, PromiseArray, apiRejection, tryConvertToPromise, INTERNAL, debug);
+__webpack_require__(291)(Promise, PromiseArray, debug);
+__webpack_require__(292)(Promise, PromiseArray, apiRejection);
+__webpack_require__(293)(Promise, INTERNAL, debug);
+__webpack_require__(294)(Promise, apiRejection, tryConvertToPromise, createContext, INTERNAL, debug);
+__webpack_require__(295)(Promise);
 __webpack_require__(296)(Promise, INTERNAL);
+__webpack_require__(297)(Promise, INTERNAL);
                                                          
     util.toFastProperties(Promise);                                          
     util.toFastProperties(Promise.prototype);                                
@@ -34782,12 +34666,12 @@ __webpack_require__(296)(Promise, INTERNAL);
 
 
 /***/ }),
-/* 262 */
+/* 263 */
 /***/ (function(module, __unused_webpack_exports, __webpack_require__) {
 
 "use strict";
 
-var es5 = __webpack_require__(263);
+var es5 = __webpack_require__(264);
 var canEvaluate = typeof navigator == "undefined";
 
 var errorObj = {e: {}};
@@ -34991,7 +34875,7 @@ function toFastProperties(obj) {
     ic();
     return obj;
     // removed by dead control flow
-{}
+
 }
 
 var rident = /^[a-z$_][a-z$_0-9]*$/i;
@@ -35196,7 +35080,7 @@ ret.isRecentNode = ret.isNode && (function() {
 ret.nodeSupportsAsyncResource = ret.isNode && (function() {
     var supportsAsync = false;
     try {
-        var res = (__webpack_require__(264).AsyncResource);
+        var res = (__webpack_require__(265).AsyncResource);
         supportsAsync = typeof res.prototype.runInAsyncScope === "function";
     } catch (e) {
         supportsAsync = false;
@@ -35211,7 +35095,7 @@ module.exports = ret;
 
 
 /***/ }),
-/* 263 */
+/* 264 */
 /***/ ((module) => {
 
 var isES5 = (function(){
@@ -35297,22 +35181,22 @@ if (isES5) {
 
 
 /***/ }),
-/* 264 */
+/* 265 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("async_hooks");
 
 /***/ }),
-/* 265 */
+/* 266 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 var firstLineError;
 try {throw new Error(); } catch (e) {firstLineError = e;}
-var schedule = __webpack_require__(266);
-var Queue = __webpack_require__(267);
+var schedule = __webpack_require__(267);
+var Queue = __webpack_require__(268);
 
 function Async() {
     this._customScheduler = false;
@@ -35431,12 +35315,12 @@ module.exports.firstLineError = firstLineError;
 
 
 /***/ }),
-/* 266 */
+/* 267 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var schedule;
 var noAsyncScheduler = function() {
     throw new Error("No async scheduler available\u000a\u000a    See http://goo.gl/MqrFmX\u000a");
@@ -35500,7 +35384,7 @@ module.exports = schedule;
 
 
 /***/ }),
-/* 267 */
+/* 268 */
 /***/ ((module) => {
 
 "use strict";
@@ -35580,14 +35464,14 @@ module.exports = Queue;
 
 
 /***/ }),
-/* 268 */
+/* 269 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
-var es5 = __webpack_require__(263);
+var es5 = __webpack_require__(264);
 var Objectfreeze = es5.freeze;
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var inherits = util.inherits;
 var notEnumerableProp = util.notEnumerableProp;
 
@@ -35703,13 +35587,13 @@ module.exports = {
 
 
 /***/ }),
-/* 269 */
+/* 270 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(Promise, INTERNAL) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var errorObj = util.errorObj;
 var isObject = util.isObject;
 
@@ -35796,14 +35680,14 @@ return tryConvertToPromise;
 
 
 /***/ }),
-/* 270 */
+/* 271 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(Promise, INTERNAL, tryConvertToPromise,
     apiRejection, Proxyable) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var isArray = util.isArray;
 
 function toResolutionValue(val) {
@@ -35989,7 +35873,7 @@ return PromiseArray;
 
 
 /***/ }),
-/* 271 */
+/* 272 */
 /***/ ((module) => {
 
 "use strict";
@@ -36065,7 +35949,7 @@ return Context;
 
 
 /***/ }),
-/* 272 */
+/* 273 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -36073,9 +35957,9 @@ return Context;
 module.exports = function(Promise, Context,
     enableAsyncHooks, disableAsyncHooks) {
 var async = Promise._async;
-var Warning = (__webpack_require__(268).Warning);
-var util = __webpack_require__(262);
-var es5 = __webpack_require__(263);
+var Warning = (__webpack_require__(269).Warning);
+var util = __webpack_require__(263);
+var es5 = __webpack_require__(264);
 var canAttachTrace = util.canAttachTrace;
 var unhandledRejectionHandled;
 var possiblyUnhandledRejection;
@@ -37081,16 +36965,16 @@ return {
 
 
 /***/ }),
-/* 273 */
+/* 274 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(Promise, tryConvertToPromise, NEXT_FILTER) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var CancellationError = Promise.CancellationError;
 var errorObj = util.errorObj;
-var catchFilter = __webpack_require__(274)(NEXT_FILTER);
+var catchFilter = __webpack_require__(275)(NEXT_FILTER);
 
 function PassThroughHandlerContext(promise, type, handler) {
     this.promise = promise;
@@ -37234,14 +37118,14 @@ return PassThroughHandlerContext;
 
 
 /***/ }),
-/* 274 */
+/* 275 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(NEXT_FILTER) {
-var util = __webpack_require__(262);
-var getKeys = (__webpack_require__(263).keys);
+var util = __webpack_require__(263);
+var getKeys = (__webpack_require__(264).keys);
 var tryCatch = util.tryCatch;
 var errorObj = util.errorObj;
 
@@ -37283,16 +37167,16 @@ return catchFilter;
 
 
 /***/ }),
-/* 275 */
+/* 276 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var maybeWrapAsError = util.maybeWrapAsError;
-var errors = __webpack_require__(268);
+var errors = __webpack_require__(269);
 var OperationalError = errors.OperationalError;
-var es5 = __webpack_require__(263);
+var es5 = __webpack_require__(264);
 
 function isUntypedError(obj) {
     return obj instanceof Error &&
@@ -37341,14 +37225,14 @@ module.exports = nodebackForPromise;
 
 
 /***/ }),
-/* 276 */
+/* 277 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports =
 function(Promise, INTERNAL, tryConvertToPromise, apiRejection, debug) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var tryCatch = util.tryCatch;
 
 Promise.method = function (fn) {
@@ -37403,7 +37287,7 @@ Promise.prototype._resolveFromSyncValue = function (value) {
 
 
 /***/ }),
-/* 277 */
+/* 278 */
 /***/ ((module) => {
 
 "use strict";
@@ -37477,13 +37361,13 @@ Promise.bind = function (thisArg, value) {
 
 
 /***/ }),
-/* 278 */
+/* 279 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(Promise, PromiseArray, apiRejection, debug) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var tryCatch = util.tryCatch;
 var errorObj = util.errorObj;
 var async = Promise._async;
@@ -37613,7 +37497,7 @@ Promise.prototype._resultCancelled = function() {
 
 
 /***/ }),
-/* 279 */
+/* 280 */
 /***/ ((module) => {
 
 "use strict";
@@ -37666,7 +37550,7 @@ Promise.prototype.catchReturn = function (value) {
 
 
 /***/ }),
-/* 280 */
+/* 281 */
 /***/ ((module) => {
 
 "use strict";
@@ -37776,14 +37660,14 @@ Promise.PromiseInspection = PromiseInspection;
 
 
 /***/ }),
-/* 281 */
+/* 282 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports =
 function(Promise, PromiseArray, tryConvertToPromise, INTERNAL, async) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var canEvaluate = util.canEvaluate;
 var tryCatch = util.tryCatch;
 var errorObj = util.errorObj;
@@ -37948,7 +37832,7 @@ Promise.join = function () {
 
 
 /***/ }),
-/* 282 */
+/* 283 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -37961,7 +37845,7 @@ if (cr) {
 }
 
 module.exports = function(Promise) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var canEvaluate = util.canEvaluate;
 var isIdentifier = util.isIdentifier;
 
@@ -38078,7 +37962,7 @@ Promise.prototype.get = function (propertyName) {
 
 
 /***/ }),
-/* 283 */
+/* 284 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -38089,9 +37973,9 @@ module.exports = function(Promise,
                           tryConvertToPromise,
                           Proxyable,
                           debug) {
-var errors = __webpack_require__(268);
+var errors = __webpack_require__(269);
 var TypeError = errors.TypeError;
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var errorObj = util.errorObj;
 var tryCatch = util.tryCatch;
 var yieldHandlers = [];
@@ -38308,7 +38192,7 @@ Promise.spawn = function (generatorFunction) {
 
 
 /***/ }),
-/* 284 */
+/* 285 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -38319,7 +38203,7 @@ module.exports = function(Promise,
                           tryConvertToPromise,
                           INTERNAL,
                           debug) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var tryCatch = util.tryCatch;
 var errorObj = util.errorObj;
 var async = Promise._async;
@@ -38490,13 +38374,13 @@ Promise.map = function (promises, fn, options, _filter) {
 
 
 /***/ }),
-/* 285 */
+/* 286 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(Promise) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var async = Promise._async;
 var tryCatch = util.tryCatch;
 var errorObj = util.errorObj;
@@ -38555,19 +38439,19 @@ Promise.prototype.asCallback = Promise.prototype.nodeify = function (nodeback,
 
 
 /***/ }),
-/* 286 */
+/* 287 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(Promise, INTERNAL) {
 var THIS = {};
-var util = __webpack_require__(262);
-var nodebackForPromise = __webpack_require__(275);
+var util = __webpack_require__(263);
+var nodebackForPromise = __webpack_require__(276);
 var withAppended = util.withAppended;
 var maybeWrapAsError = util.maybeWrapAsError;
 var canEvaluate = util.canEvaluate;
-var TypeError = (__webpack_require__(268).TypeError);
+var TypeError = (__webpack_require__(269).TypeError);
 var defaultSuffix = "Async";
 var defaultPromisified = {__isPromisified__: true};
 var noCopyProps = [
@@ -38876,16 +38760,16 @@ Promise.promisifyAll = function (target, options) {
 
 
 /***/ }),
-/* 287 */
+/* 288 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(
     Promise, PromiseArray, tryConvertToPromise, apiRejection) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var isObject = util.isObject;
-var es5 = __webpack_require__(263);
+var es5 = __webpack_require__(264);
 var Es6Map;
 if (typeof Map === "function") Es6Map = Map;
 
@@ -39001,14 +38885,14 @@ Promise.props = function (promises) {
 
 
 /***/ }),
-/* 288 */
+/* 289 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(
     Promise, INTERNAL, tryConvertToPromise, apiRejection) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 
 var raceLater = function (promise) {
     return promise.then(function(array) {
@@ -39057,7 +38941,7 @@ Promise.prototype.race = function () {
 
 
 /***/ }),
-/* 289 */
+/* 290 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -39068,7 +38952,7 @@ module.exports = function(Promise,
                           tryConvertToPromise,
                           INTERNAL,
                           debug) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var tryCatch = util.tryCatch;
 
 function ReductionPromiseArray(promises, fn, initialValue, _each) {
@@ -39247,7 +39131,7 @@ function gotValue(value) {
 
 
 /***/ }),
-/* 290 */
+/* 291 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
@@ -39255,7 +39139,7 @@ function gotValue(value) {
 module.exports =
     function(Promise, PromiseArray, debug) {
 var PromiseInspection = Promise.PromiseInspection;
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 
 function SettledPromiseArray(values) {
     this.constructor$(values);
@@ -39301,16 +39185,16 @@ Promise.prototype.settle = function () {
 
 
 /***/ }),
-/* 291 */
+/* 292 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports =
 function(Promise, PromiseArray, apiRejection) {
-var util = __webpack_require__(262);
-var RangeError = (__webpack_require__(268).RangeError);
-var AggregateError = (__webpack_require__(268).AggregateError);
+var util = __webpack_require__(263);
+var RangeError = (__webpack_require__(269).RangeError);
+var AggregateError = (__webpack_require__(269).AggregateError);
 var isArray = util.isArray;
 var CANCELLATION = {};
 
@@ -39456,13 +39340,13 @@ Promise._SomePromiseArray = SomePromiseArray;
 
 
 /***/ }),
-/* 292 */
+/* 293 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function(Promise, INTERNAL, debug) {
-var util = __webpack_require__(262);
+var util = __webpack_require__(263);
 var TimeoutError = Promise.TimeoutError;
 
 function HandleWrapper(handle)  {
@@ -39556,16 +39440,16 @@ Promise.prototype.timeout = function (ms, message) {
 
 
 /***/ }),
-/* 293 */
+/* 294 */
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 module.exports = function (Promise, apiRejection, tryConvertToPromise,
     createContext, INTERNAL, debug) {
-    var util = __webpack_require__(262);
-    var TypeError = (__webpack_require__(268).TypeError);
-    var inherits = (__webpack_require__(262).inherits);
+    var util = __webpack_require__(263);
+    var TypeError = (__webpack_require__(269).TypeError);
+    var inherits = (__webpack_require__(263).inherits);
     var errorObj = util.errorObj;
     var tryCatch = util.tryCatch;
     var NULL = {};
@@ -39789,7 +39673,7 @@ module.exports = function (Promise, apiRejection, tryConvertToPromise,
 
 
 /***/ }),
-/* 294 */
+/* 295 */
 /***/ ((module) => {
 
 "use strict";
@@ -39817,7 +39701,7 @@ Promise.prototype.any = function () {
 
 
 /***/ }),
-/* 295 */
+/* 296 */
 /***/ ((module) => {
 
 "use strict";
@@ -39854,7 +39738,7 @@ Promise.mapSeries = PromiseMapSeries;
 
 
 /***/ }),
-/* 296 */
+/* 297 */
 /***/ ((module) => {
 
 "use strict";
@@ -39873,13 +39757,13 @@ Promise.filter = function (promises, fn, options) {
 
 
 /***/ }),
-/* 297 */
+/* 298 */
 /***/ (() => {
 
 /* (ignored) */
 
 /***/ }),
-/* 298 */
+/* 299 */
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -39914,7 +39798,7 @@ function isIterable(val) {
 
 
 /***/ }),
-/* 299 */
+/* 300 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -39928,11 +39812,37 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __asyncValues = (this && this.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
+var __await = (this && this.__await) || function (v) { return this instanceof __await ? (this.v = v, this) : new __await(v); }
+var __asyncDelegator = (this && this.__asyncDelegator) || function (o) {
+    var i, p;
+    return i = {}, verb("next"), verb("throw", function (e) { throw e; }), verb("return"), i[Symbol.iterator] = function () { return this; }, i;
+    function verb(n, f) { i[n] = o[n] ? function (v) { return (p = !p) ? { value: __await(o[n](v)), done: false } : f ? f(v) : v; } : f; }
+};
+var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _arguments, generator) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var g = generator.apply(thisArg, _arguments || []), i, q = [];
+    return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function () { return this; }, i;
+    function awaitReturn(f) { return function (v) { return Promise.resolve(v).then(f, reject); }; }
+    function verb(n, f) { if (g[n]) { i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; if (f) i[n] = f(i[n]); } }
+    function resume(n, v) { try { step(g[n](v)); } catch (e) { settle(q[0][3], e); } }
+    function step(r) { r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r); }
+    function fulfill(value) { resume("next", value); }
+    function reject(value) { resume("throw", value); }
+    function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ESPHomeDocuments = exports.ESPHomeDocument = void 0;
 const yaml_1 = __webpack_require__(115);
-const editor_shims_1 = __webpack_require__(187);
-const objects_1 = __webpack_require__(298);
+const objects_1 = __webpack_require__(299);
+const text_buffer_1 = __webpack_require__(301);
+const vscode_languageserver_textdocument_1 = __webpack_require__(81);
 class CommonTagImpl {
     constructor(tag, type) {
         this.default = false;
@@ -39942,16 +39852,32 @@ class CommonTagImpl {
     get collection() {
         return undefined;
     }
-    identify(value) {
+    identify(_value) {
         return true;
     }
     resolve(value) {
         return value;
     }
 }
+/**
+ * Represents a single ESPHome YAML file with its parsed content.
+ * The schema is injected so it can be shared across documents.
+ *
+ * Scope distinction:
+ * - "local" scope: only this file's YAML (e.g. for deduplicating root keys,
+ *    since YAML does not allow duplicate keys in the same file)
+ * - "merged" scope: this file + all included files (e.g. for ID lookups,
+ *    since ESPHome merges all dicts from included files at runtime)
+ */
 class ESPHomeDocument {
-    constructor(text) {
+    constructor(text, schema, 
+    /** Absolute URI/path for resolving relative includes */
+    fileUri) {
         this.text = text;
+        this.schema = schema;
+        this.fileUri = fileUri;
+        /** Documents loaded from !include / packages references */
+        this.includedDocuments = [];
         this.bufferText = text.getText();
         this.yaml = this.parse(this.bufferText);
     }
@@ -39963,12 +39889,18 @@ class ESPHomeDocument {
         }
         this.bufferText = text;
         this.yaml = this.parse(this.bufferText);
+        // Invalidate includes so they get re-resolved on next access
+        this.includedDocuments = [];
     }
     parse(text) {
         const options = {
             strict: false,
             version: "1.2",
-            customTags: [new CommonTagImpl("!secret", "scalar")],
+            customTags: [
+                new CommonTagImpl("!secret", "scalar"),
+                new CommonTagImpl("!include", "scalar"),
+                new CommonTagImpl("!lambda", "scalar"),
+            ],
         };
         const composer = new yaml_1.Composer(options);
         const lineCounter = new yaml_1.LineCounter();
@@ -39981,6 +39913,7 @@ class ESPHomeDocument {
         const docs = composer.compose(tokensArr, true, text.length);
         return Array.from(docs)[0];
     }
+    // ─── YAML Navigation ──────────────────────────────────────────────────────
     getParent(nodeToFind) {
         let parentNode = undefined;
         (0, yaml_1.visit)(this.yaml, (_, node, path) => {
@@ -40016,7 +39949,7 @@ class ESPHomeDocument {
     getNodeFromOffset(offset) {
         let closestNode = undefined;
         let scalarAfterOffset = false;
-        (0, yaml_1.visit)(this.yaml, (key, node) => {
+        (0, yaml_1.visit)(this.yaml, (_key, node) => {
             if (!node || !(0, yaml_1.isNode)(node)) {
                 return;
             }
@@ -40047,6 +39980,11 @@ class ESPHomeDocument {
         });
         return closestNode;
     }
+    // ─── Schema + Document traversal ──────────────────────────────────────────
+    /**
+     * Walk the path through YAML and schema simultaneously, returning the
+     * ConfigVar and YAML node at the end of the path.
+     */
     getConfigVarAndPathNode(path) {
         return __awaiter(this, void 0, void 0, function* () {
             let pathNode = this.yaml.contents;
@@ -40056,20 +39994,21 @@ class ESPHomeDocument {
                     if (cv === undefined && index <= 2 && pathNode.get("platform")) {
                         const componentName = pathNode.get("platform");
                         if ((0, objects_1.isString)(componentName)) {
-                            const platformComponents = yield editor_shims_1.coreSchema.getPlatformList();
+                            const platformComponents = yield this.schema.getPlatformList();
                             if ((0, objects_1.isString)(path[0]) && path[0] in platformComponents) {
-                                const c = yield editor_shims_1.coreSchema.getComponent(path[0]);
+                                const c = yield this.schema.getComponent(path[0]);
                                 if (c.components !== undefined && componentName in c.components) {
-                                    cv = yield editor_shims_1.coreSchema.getComponentPlatformSchema(componentName, path[0]);
+                                    cv = yield this.schema.getComponentPlatformSchema(componentName, path[0]);
                                 }
                             }
                         }
                     }
                     pathNode = pathNode.get(path[index], true);
                     if (cv === undefined) {
-                        const rootComponents = yield editor_shims_1.coreSchema.getComponentList();
+                        const rootComponents = yield this.schema.getComponentList();
                         if ((0, objects_1.isString)(path[0]) && path[0] in rootComponents) {
-                            cv = (yield editor_shims_1.coreSchema.getComponent(path[0])).schemas.CONFIG_SCHEMA;
+                            cv = (yield this.schema.getComponent(path[0])).schemas
+                                .CONFIG_SCHEMA;
                         }
                     }
                     else {
@@ -40077,7 +40016,7 @@ class ESPHomeDocument {
                         if ((0, objects_1.isString)(pathIndex)) {
                             if (cv.type === "schema" || cv.type === "trigger") {
                                 if (cv.schema !== undefined) {
-                                    const schema_cv = yield editor_shims_1.coreSchema.findConfigVar(cv.schema, pathIndex, this.yaml);
+                                    const schema_cv = yield this.findConfigVar(cv.schema, pathIndex);
                                     if (schema_cv !== undefined) {
                                         cv = schema_cv;
                                         continue;
@@ -40087,7 +40026,7 @@ class ESPHomeDocument {
                                     if (pathIndex === "then") {
                                         continue;
                                     }
-                                    const action = yield editor_shims_1.coreSchema.getActionConfigVar(pathIndex);
+                                    const action = yield this.schema.getActionConfigVar(pathIndex);
                                     if (action !== undefined) {
                                         cv = action;
                                         continue;
@@ -40095,7 +40034,7 @@ class ESPHomeDocument {
                                 }
                             }
                             if (cv.type === "registry") {
-                                cv = yield editor_shims_1.coreSchema.getRegistryConfigVar(cv.registry, pathIndex);
+                                cv = yield this.schema.getRegistryConfigVar(cv.registry, pathIndex);
                             }
                         }
                     }
@@ -40110,20 +40049,554 @@ class ESPHomeDocument {
             return [cv, pathNode];
         });
     }
+    // ─── Schema delegation (with local document context) ──────────────────────
+    /**
+     * Iterate config vars for a schema using this document's local YAML for
+     * context-aware filtering (e.g. MQTT props hidden when mqtt not present).
+     * Use this for completions that operate on the current file.
+     */
+    iterConfigVars(schema_1) {
+        return __asyncGenerator(this, arguments, function* iterConfigVars_1(schema, yielded = []) {
+            yield __await(yield* __asyncDelegator(__asyncValues(this.schema.iterConfigVars(schema, this.yaml.contents, yielded))));
+        });
+    }
+    /**
+     * Find a config var by name within a schema, using local document context.
+     */
+    findConfigVar(schema, prop) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return this.schema.findConfigVar(schema, prop, this.yaml.contents);
+        });
+    }
+    // ─── Document-aware component iteration ───────────────────────────────────
+    /**
+     * Iterate components used in a single YAML document, contributing results
+     * into the shared `yieldedComponents` / `addPollingComponent` state so that
+     * callers can merge multiple documents without duplicates.
+     */
+    iterSingleYamlComponents(docYaml, yieldedComponents, pollingRef) {
+        return __asyncGenerator(this, arguments, function* iterSingleYamlComponents_1() {
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+            const docMap = docYaml.contents;
+            if (!(docMap === null || docMap === void 0 ? void 0 : docMap.items))
+                return yield __await(void 0);
+            for (const k of docMap.items) {
+                if ((0, yaml_1.isPair)(k) && (0, yaml_1.isScalar)(k.key)) {
+                    const componentName = k.key.value;
+                    const isPlatformComponent = yield __await(this.schema.isPlatform(componentName));
+                    if (!isPlatformComponent &&
+                        !(componentName in (yield __await(this.schema.getSchema())).core.components)) {
+                        continue;
+                    }
+                    const component = yield __await(this.schema.getComponent(componentName));
+                    if (!yieldedComponents.includes(componentName)) {
+                        yield yield __await([componentName, component, k.value]);
+                        yieldedComponents.push(componentName);
+                    }
+                    if (isPlatformComponent) {
+                        const platList = docMap.get(componentName);
+                        if ((0, yaml_1.isSeq)(platList)) {
+                            for (const plat of platList.items) {
+                                if ((0, yaml_1.isMap)(plat)) {
+                                    const platCompName = plat.get("platform");
+                                    if (platCompName in component.components) {
+                                        const platComponent = yield __await(this.schema.getComponent(platCompName, componentName));
+                                        if (!pollingRef.value) {
+                                            if ((_e = (_d = (_c = (_b = (_a = platComponent.schemas.CONFIG_SCHEMA) === null || _a === void 0 ? void 0 : _a.schema) === null || _b === void 0 ? void 0 : _b.config_vars.id) === null || _c === void 0 ? void 0 : _c.id_type) === null || _d === void 0 ? void 0 : _d.parents) === null || _e === void 0 ? void 0 : _e.includes("PollingComponent")) {
+                                                pollingRef.value = true;
+                                            }
+                                        }
+                                        const platKey = `${componentName}.${platCompName}`;
+                                        if (!yieldedComponents.includes(platKey)) {
+                                            // Yield the platform-specific component with platform set for
+                                            // correct action naming (e.g. sensor.template.publish)
+                                            yield yield __await([
+                                                platCompName,
+                                                Object.assign(Object.assign({}, platComponent), { platform: componentName }),
+                                                plat,
+                                            ]);
+                                            yieldedComponents.push(platKey);
+                                        }
+                                        // Also yield the base component (e.g. "pzemac" without platform)
+                                        // so its component-level actions are named pzemac.reset_energy
+                                        if (!yieldedComponents.includes(platCompName)) {
+                                            const baseComponent = yield __await(this.schema.getComponent(platCompName));
+                                            if (baseComponent) {
+                                                yield yield __await([platCompName, baseComponent, plat]);
+                                            }
+                                            yieldedComponents.push(platCompName);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        if (!pollingRef.value &&
+                            ((_k = (_j = (_h = (_g = (_f = component.schemas.CONFIG_SCHEMA) === null || _f === void 0 ? void 0 : _f.schema) === null || _g === void 0 ? void 0 : _g.config_vars.id) === null || _h === void 0 ? void 0 : _h.id_type) === null || _j === void 0 ? void 0 : _j.parents) === null || _k === void 0 ? void 0 : _k.includes("PollingComponent"))) {
+                            pollingRef.value = true;
+                        }
+                        if (componentName === "api" &&
+                            !yieldedComponents.includes("homeassistant")) {
+                            yield yield __await([
+                                "homeassistant",
+                                yield __await(this.schema.getComponent("homeassistant")),
+                                k.value,
+                            ]);
+                            yieldedComponents.push("homeassistant");
+                        }
+                    }
+                }
+            }
+        });
+    }
+    /**
+     * Iterate all components actively used across this file AND all included
+     * files (merged scope). Deduplicates by component name so each component is
+     * yielded only once even if it appears in multiple files.
+     *
+     * Used for:
+     *   - determining available action/condition/filter registries
+     *   - detecting PollingComponent for component.update
+     */
+    getDocComponents() {
+        return __asyncGenerator(this, arguments, function* getDocComponents_1() {
+            const yieldedComponents = [];
+            const pollingRef = { value: false };
+            for (const doc of this.getAllDocuments()) {
+                yield __await(yield* __asyncDelegator(__asyncValues(doc.iterSingleYamlComponents(doc.yaml, yieldedComponents, pollingRef))));
+            }
+            if (pollingRef.value) {
+                yield yield __await([
+                    "component",
+                    yield __await(this.schema.getComponent("component")),
+                    undefined,
+                ]);
+            }
+            yield yield __await(["core", (yield __await(this.schema.getSchema())).core, undefined]);
+        });
+    }
+    /**
+     * Iterate registry entries available in this document (merged scope).
+     *
+     * - For domain-specific registries (e.g. "sensor.filter"): pure schema lookup.
+     * - For global registries (e.g. "action", "condition"): uses getDocComponents()
+     *   which already covers this file and all included files.
+     */
+    getRegistry(registry) {
+        return __asyncGenerator(this, arguments, function* getRegistry_1() {
+            var _a, e_1, _b, _c;
+            if (registry.includes(".")) {
+                // domain.registryName format — pure schema, no doc context needed
+                yield __await(yield* __asyncDelegator(__asyncValues(this.schema.getDomainRegistry(registry))));
+            }
+            else {
+                if (this.schema.isRegistry(registry)) {
+                    try {
+                        for (var _d = true, _e = __asyncValues(this.getDocComponents()), _f; _f = yield __await(_e.next()), _a = _f.done, !_a; _d = true) {
+                            _c = _f.value;
+                            _d = false;
+                            const [componentName, component,] = _c;
+                            const componentRegistry = component
+                                ? component[registry]
+                                : undefined;
+                            if (componentRegistry !== undefined) {
+                                for (const name in componentRegistry) {
+                                    if (componentName === "core") {
+                                        yield yield __await([name, componentRegistry[name]]);
+                                    }
+                                    else if (component.platform) {
+                                        // Platform-specific action: e.g. sensor.template.publish
+                                        yield yield __await([
+                                            `${component.platform}.${componentName}.${name}`,
+                                            componentRegistry[name],
+                                        ]);
+                                    }
+                                    else {
+                                        // Base component action: e.g. pzemac.reset_energy
+                                        yield yield __await([`${componentName}.${name}`, componentRegistry[name]]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (e_1_1) { e_1 = { error: e_1_1 }; }
+                    finally {
+                        try {
+                            if (!_d && !_a && (_b = _e.return)) yield __await(_b.call(_e));
+                        }
+                        finally { if (e_1) throw e_1.error; }
+                    }
+                }
+            }
+        });
+    }
+    // ─── ID declaration traversal (merged scope) ──────────────────────────────
+    iterDeclaringIdsInner(idType, map, declaringCv, localYaml) {
+        return __asyncGenerator(this, arguments, function* iterDeclaringIdsInner_1() {
+            var _a, e_2, _b, _c, _d, e_3, _e, _f;
+            var _g;
+            let schema;
+            if (declaringCv.type === "schema") {
+                schema = declaringCv.schema;
+            }
+            else if (declaringCv.type === "typed") {
+                const schemaType = map.get(declaringCv.typed_key);
+                schema =
+                    schemaType in declaringCv.types
+                        ? declaringCv.types[schemaType]
+                        : declaringCv.types[Object.keys(declaringCv.types)[0]];
+            }
+            else {
+                return yield __await(void 0);
+            }
+            for (const k of map.items) {
+                if ((0, yaml_1.isPair)(k) && (0, yaml_1.isScalar)(k.key)) {
+                    const propName = k.key.value;
+                    const cv = yield __await(this.schema.findConfigVar(schema, propName, localYaml.contents));
+                    if (cv) {
+                        const idCv = cv;
+                        if (idCv.id_type &&
+                            (idCv.id_type.class === idType ||
+                                ((_g = idCv.id_type.parents) === null || _g === void 0 ? void 0 : _g.includes(idType)))) {
+                            yield yield __await(k.value);
+                        }
+                        if ((0, yaml_1.isMap)(k.value)) {
+                            try {
+                                for (var _h = true, _j = (e_2 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, k.value, cv, localYaml))), _k; _k = yield __await(_j.next()), _a = _k.done, !_a; _h = true) {
+                                    _c = _k.value;
+                                    _h = false;
+                                    const yieldNode = _c;
+                                    yield yield __await(yieldNode);
+                                }
+                            }
+                            catch (e_2_1) { e_2 = { error: e_2_1 }; }
+                            finally {
+                                try {
+                                    if (!_h && !_a && (_b = _j.return)) yield __await(_b.call(_j));
+                                }
+                                finally { if (e_2) throw e_2.error; }
+                            }
+                        }
+                        else if (cv.is_list && (0, yaml_1.isSeq)(k.value)) {
+                            for (const seqItem of k.value.items) {
+                                if ((0, yaml_1.isMap)(seqItem)) {
+                                    try {
+                                        for (var _l = true, _m = (e_3 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, seqItem, cv, localYaml))), _o; _o = yield __await(_m.next()), _d = _o.done, !_d; _l = true) {
+                                            _f = _o.value;
+                                            _l = false;
+                                            const yieldNode = _f;
+                                            yield yield __await(yieldNode);
+                                        }
+                                    }
+                                    catch (e_3_1) { e_3 = { error: e_3_1 }; }
+                                    finally {
+                                        try {
+                                            if (!_l && !_d && (_e = _m.return)) yield __await(_e.call(_m));
+                                        }
+                                        finally { if (e_3) throw e_3.error; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    /**
+     * Iterate all YAML nodes that declare an ID matching `idType` in a single
+     * parsed YAML document.
+     */
+    iterDeclaringIdsInDoc(idType, doc) {
+        return __asyncGenerator(this, arguments, function* iterDeclaringIdsInDoc_1() {
+            var _a, e_4, _b, _c, _d, e_5, _e, _f, _g, e_6, _h, _j, _k, e_7, _l, _m;
+            const docMap = doc.contents;
+            for (const k of docMap.items) {
+                if ((0, yaml_1.isPair)(k) && (0, yaml_1.isScalar)(k.key)) {
+                    const componentName = k.key.value;
+                    if (componentName in (yield __await(this.schema.getSchema())).core.components ||
+                        (yield __await(this.schema.isPlatform(componentName)))) {
+                        const component = yield __await(this.schema.getComponent(componentName));
+                        const cv = component.schemas.CONFIG_SCHEMA;
+                        if ((0, yaml_1.isMap)(k.value) && cv) {
+                            try {
+                                for (var _o = true, _p = (e_4 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, k.value, cv, doc))), _q; _q = yield __await(_p.next()), _a = _q.done, !_a; _o = true) {
+                                    _c = _q.value;
+                                    _o = false;
+                                    const yieldNode = _c;
+                                    yield yield __await(yieldNode);
+                                }
+                            }
+                            catch (e_4_1) { e_4 = { error: e_4_1 }; }
+                            finally {
+                                try {
+                                    if (!_o && !_a && (_b = _p.return)) yield __await(_b.call(_p));
+                                }
+                                finally { if (e_4) throw e_4.error; }
+                            }
+                        }
+                        else if ((0, yaml_1.isSeq)(k.value) && cv && cv.is_list) {
+                            const nodeList = k.value;
+                            for (const item of nodeList.items) {
+                                if ((0, yaml_1.isMap)(item) && (0, yaml_1.isScalar)(item.get("id", true)) && cv) {
+                                    try {
+                                        for (var _r = true, _s = (e_5 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, item, cv, doc))), _t; _t = yield __await(_s.next()), _d = _t.done, !_d; _r = true) {
+                                            _f = _t.value;
+                                            _r = false;
+                                            const yieldNode = _f;
+                                            yield yield __await(yieldNode);
+                                        }
+                                    }
+                                    catch (e_5_1) { e_5 = { error: e_5_1 }; }
+                                    finally {
+                                        try {
+                                            if (!_r && !_d && (_e = _s.return)) yield __await(_e.call(_s));
+                                        }
+                                        finally { if (e_5) throw e_5.error; }
+                                    }
+                                }
+                            }
+                        }
+                        if (yield __await(this.schema.isPlatform(componentName))) {
+                            // iterate elements and lookup platform to load components
+                            const platNode = k.value;
+                            if ((0, yaml_1.isSeq)(platNode)) {
+                                for (const seqItemNode of platNode.items) {
+                                    if ((0, yaml_1.isMap)(seqItemNode)) {
+                                        const platCompName = seqItemNode.get("platform");
+                                        if (platCompName in component.components) {
+                                            const platComponent = yield __await(this.schema.getComponent(platCompName, componentName));
+                                            const platCv = platComponent.schemas.CONFIG_SCHEMA;
+                                            if (platCv !== undefined)
+                                                try {
+                                                    for (var _u = true, _v = (e_6 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, seqItemNode, platCv, doc))), _w; _w = yield __await(_v.next()), _g = _w.done, !_g; _u = true) {
+                                                        _j = _w.value;
+                                                        _u = false;
+                                                        const yieldNode = _j;
+                                                        yield yield __await(yieldNode);
+                                                    }
+                                                }
+                                                catch (e_6_1) { e_6 = { error: e_6_1 }; }
+                                                finally {
+                                                    try {
+                                                        if (!_u && !_g && (_h = _v.return)) yield __await(_h.call(_v));
+                                                    }
+                                                    finally { if (e_6) throw e_6.error; }
+                                                }
+                                        }
+                                    }
+                                }
+                            }
+                            else if ((0, yaml_1.isMap)(platNode)) {
+                                const platCompName = platNode.get("platform");
+                                if (platCompName in component.components) {
+                                    const platComponent = yield __await(this.schema.getComponent(platCompName, componentName));
+                                    const platCv = platComponent.schemas.CONFIG_SCHEMA;
+                                    try {
+                                        for (var _x = true, _y = (e_7 = void 0, __asyncValues(this.iterDeclaringIdsInner(idType, platNode, platCv, doc))), _z; _z = yield __await(_y.next()), _k = _z.done, !_k; _x = true) {
+                                            _m = _z.value;
+                                            _x = false;
+                                            const yieldNode = _m;
+                                            yield yield __await(yieldNode);
+                                        }
+                                    }
+                                    catch (e_7_1) { e_7 = { error: e_7_1 }; }
+                                    finally {
+                                        try {
+                                            if (!_x && !_k && (_l = _y.return)) yield __await(_l.call(_y));
+                                        }
+                                        finally { if (e_7) throw e_7.error; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    /**
+     * Iterate all nodes declaring an ID of `idType` across this file AND all
+     * included files (merged scope). Yields [owning document, node] pairs so
+     * callers can determine which file the declaration lives in.
+     */
+    iterDeclaringIds(idType) {
+        return __asyncGenerator(this, arguments, function* iterDeclaringIds_1() {
+            var _a, e_8, _b, _c;
+            for (const doc of this.getAllDocuments()) {
+                try {
+                    for (var _d = true, _e = (e_8 = void 0, __asyncValues(doc.iterDeclaringIdsInDoc(idType, doc.yaml))), _f; _f = yield __await(_e.next()), _a = _f.done, !_a; _d = true) {
+                        _c = _f.value;
+                        _d = false;
+                        const node = _c;
+                        yield yield __await([doc, node]);
+                    }
+                }
+                catch (e_8_1) { e_8 = { error: e_8_1 }; }
+                finally {
+                    try {
+                        if (!_d && !_a && (_b = _e.return)) yield __await(_b.call(_e));
+                    }
+                    finally { if (e_8) throw e_8.error; }
+                }
+            }
+        });
+    }
+    /**
+     * Get all usable IDs of a given type across this document and its includes.
+     * Use this for `use_id` completions — needs merged scope.
+     */
+    getUsableIds(use_id_type) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, e_9, _b, _c;
+            const ret = [];
+            try {
+                for (var _d = true, _e = __asyncValues(this.iterDeclaringIds(use_id_type)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                    _c = _f.value;
+                    _d = false;
+                    const [, item] = _c;
+                    ret.push(item.toString());
+                }
+            }
+            catch (e_9_1) { e_9 = { error: e_9_1 }; }
+            finally {
+                try {
+                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+                }
+                finally { if (e_9) throw e_9.error; }
+            }
+            return ret;
+        });
+    }
+    /**
+     * Find an ID declaration across this document and its includes.
+     * Returns the owning document and YAML range for goto-definition.
+     */
+    findComponentDefinition(id_type, id) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, e_10, _b, _c;
+            try {
+                for (var _d = true, _e = __asyncValues(this.iterDeclaringIds(id_type)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                    _c = _f.value;
+                    _d = false;
+                    const [doc, item] = _c;
+                    if ((0, yaml_1.isScalar)(item) && item.value === id) {
+                        return { doc, range: item.range };
+                    }
+                }
+            }
+            catch (e_10_1) { e_10 = { error: e_10_1 }; }
+            finally {
+                try {
+                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+                }
+                finally { if (e_10) throw e_10.error; }
+            }
+            return null;
+        });
+    }
+    // ─── Include support ───────────────────────────────────────────────────────
+    /**
+     * Returns all documents in the merged set: this document first, then any
+     * loaded included documents.
+     */
+    getAllDocuments() {
+        return [this, ...this.includedDocuments];
+    }
+    /**
+     * Extract relative file paths referenced by !include tags and the packages:
+     * section in this document's YAML.
+     */
+    getIncludeUris() {
+        var _a;
+        const seen = new Set();
+        const add = (path) => {
+            if (!seen.has(path))
+                seen.add(path);
+        };
+        if (!((_a = this.yaml) === null || _a === void 0 ? void 0 : _a.contents))
+            return [];
+        (0, yaml_1.visit)(this.yaml, (_key, node) => {
+            // !include scalar: value is the relative path
+            if ((0, yaml_1.isScalar)(node) && node.tag === "!include" && (0, objects_1.isString)(node.value)) {
+                add(node.value);
+                return;
+            }
+            // !include map: { file: <path>, ... }
+            if ((0, yaml_1.isMap)(node) && node.tag === "!include") {
+                const fileVal = node.get("file");
+                if ((0, objects_1.isString)(fileVal))
+                    add(fileVal);
+                return;
+            }
+        });
+        // packages: <name>: file: <path>  (dict-format packages without url)
+        const docMap = this.yaml.contents;
+        const packagesNode = docMap === null || docMap === void 0 ? void 0 : docMap.get("packages", true);
+        if ((0, yaml_1.isMap)(packagesNode)) {
+            for (const pair of packagesNode.items) {
+                if ((0, yaml_1.isPair)(pair) && (0, yaml_1.isMap)(pair.value)) {
+                    const fileVal = pair.value.get("file");
+                    if ((0, objects_1.isString)(fileVal))
+                        add(fileVal);
+                }
+            }
+        }
+        return [...seen];
+    }
+    /**
+     * Load included files using the provided loader and attach them to this
+     * document. Called by ESPHomeDocuments when a document is updated.
+     *
+     * Included documents share the same schema instance.
+     */
+    loadIncludes(loader) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!this.fileUri)
+                return;
+            const includeUris = this.getIncludeUris();
+            this.includedDocuments = [];
+            for (const relativePath of includeUris) {
+                try {
+                    const content = yield loader(relativePath, this.fileUri);
+                    if (content !== undefined) {
+                        const resolvedUri = new URL(relativePath, this.fileUri).toString();
+                        const textDoc = vscode_languageserver_textdocument_1.TextDocument.create(resolvedUri, "yaml", 0, content);
+                        const buffer = new text_buffer_1.TextBuffer(textDoc);
+                        const includedDoc = new ESPHomeDocument(buffer, this.schema, resolvedUri);
+                        this.includedDocuments.push(includedDoc);
+                    }
+                }
+                catch (_a) {
+                    // Skip files that can't be loaded
+                }
+            }
+        });
+    }
 }
 exports.ESPHomeDocument = ESPHomeDocument;
 class ESPHomeDocuments {
-    constructor() {
+    constructor(schema) {
+        this.schema = schema;
         this.documents = {};
     }
+    setFileLoader(loader) {
+        this.fileLoader = loader;
+    }
     update(uri, buffer) {
-        const doc = this.documents[uri];
-        if (doc === undefined) {
-            this.documents[uri] = new ESPHomeDocument(buffer);
-        }
-        else {
-            doc.update(buffer);
-        }
+        return __awaiter(this, void 0, void 0, function* () {
+            const doc = this.documents[uri];
+            if (doc === undefined) {
+                this.documents[uri] = new ESPHomeDocument(buffer, this.schema, uri);
+            }
+            else {
+                doc.update(buffer);
+            }
+            if (this.fileLoader) {
+                yield this.documents[uri].loadIncludes(this.fileLoader);
+            }
+        });
     }
     getDocument(uri) {
         return this.documents[uri];
@@ -40133,7 +40606,7 @@ exports.ESPHomeDocuments = ESPHomeDocuments;
 
 
 /***/ }),
-/* 300 */
+/* 301 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 "use strict";
@@ -40195,7 +40668,7 @@ exports.TextBuffer = TextBuffer;
 
 
 /***/ }),
-/* 301 */
+/* 302 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -40220,7 +40693,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.CompletionsHandler = void 0;
 const yaml_1 = __webpack_require__(115);
 const editor_shims_1 = __webpack_require__(187);
-const objects_1 = __webpack_require__(298);
+const objects_1 = __webpack_require__(299);
 class CompletionsHandler {
     constructor(documents) {
         this.documents = documents;
@@ -40336,7 +40809,7 @@ class CompletionsHandler {
             }
         });
     }
-    getPlatformNames(platform_name, range) {
+    getPlatformNames(platform_name, _range) {
         return __awaiter(this, void 0, void 0, function* () {
             const c = yield editor_shims_1.coreSchema.getComponent(platform_name);
             if (c.components === undefined) {
@@ -40356,7 +40829,8 @@ class CompletionsHandler {
             const platformList = yield editor_shims_1.coreSchema.getPlatformList();
             const result = [];
             for (var platformName in platformList) {
-                // Don't add duplicate keys
+                // Don't add duplicate keys — check local file only (YAML doesn't allow
+                // duplicate keys in the same file, but includes can have them via ESPHome merge)
                 if (this.docMap && this.mapHasScalarKey(this.docMap, platformName)) {
                     continue;
                 }
@@ -40369,7 +40843,7 @@ class CompletionsHandler {
                 if (componentName in platformList) {
                     continue;
                 }
-                // Don't add duplicate keys
+                // Don't add duplicate keys — check local file only
                 if (this.docMap && this.mapHasScalarKey(this.docMap, componentName)) {
                     continue;
                 }
@@ -40399,18 +40873,6 @@ class CompletionsHandler {
         }
         if (this.docMap.get("esp32", true) !== undefined) {
             return "esp32";
-        }
-        const esphome = this.docMap.get("esphome");
-        if ((0, yaml_1.isMap)(esphome)) {
-            const chipset = esphome.get("platform");
-            if ((0, objects_1.isString)(chipset)) {
-                if (chipset.toLowerCase() === "esp32") {
-                    return "esp32";
-                }
-                if (chipset.toLowerCase() === "esp8266") {
-                    return "esp8266";
-                }
-            }
         }
         return undefined;
     }
@@ -40442,7 +40904,7 @@ class CompletionsHandler {
                         if ((0, yaml_1.isScalar)(cursorNode)) {
                             const complete = yield editor_shims_1.coreSchema.getConfigVarComplete2(cv);
                             if (complete["maybe"] !== undefined) {
-                                const maybe_cv = yield editor_shims_1.coreSchema.findConfigVar(cv.schema, complete["maybe"], this.document.yaml);
+                                const maybe_cv = yield this.document.findConfigVar(cv.schema, complete["maybe"]);
                                 return this.resolveConfigVar(path, pathIndex, maybe_cv, null, cursorNode);
                             }
                         }
@@ -40509,10 +40971,6 @@ class CompletionsHandler {
                 return [];
             }
             else if (cv.type === "pin") {
-                //if (parentElement.items.length > 0 && isScalar(node) && node === parentElement.items[0].value) {
-                // cursor is in the value of the pair
-                //    return this.resolvePinNumbers(result, cv);
-                //}
                 if (!cv.schema) {
                     // This pin does not accept schema, e.g. i2c
                     return [];
@@ -40572,8 +41030,9 @@ class CompletionsHandler {
                 return result;
             }
             else if (cv.type === "use_id") {
+                // use_id completions need the merged (whole-document) scope
                 let result = [];
-                const usableIds = yield editor_shims_1.coreSchema.getUsableIds(cv.use_id_type, this.document.yaml);
+                const usableIds = yield this.document.getUsableIds(cv.use_id_type);
                 for (var usableId of usableIds) {
                     result.push((0, editor_shims_1.createCompletion)(usableId, usableId, editor_shims_1.CompletionItemKind.Variable));
                 }
@@ -40617,7 +41076,8 @@ class CompletionsHandler {
                     prefix = "- ";
             }
             try {
-                for (var _d = true, _e = __asyncValues(editor_shims_1.coreSchema.iterConfigVars(schema, this.document.yaml)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                // iterConfigVars is document-aware (MQTT filtering uses local YAML)
+                for (var _d = true, _e = __asyncValues(this.document.iterConfigVars(schema)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
                     _c = _f.value;
                     _d = false;
                     const [prop, config] = _c;
@@ -40707,7 +41167,8 @@ class CompletionsHandler {
     resolveSchema(path, pathIndex, schema, pathElement, node) {
         return __awaiter(this, void 0, void 0, function* () {
             console.log("component: " + path[pathIndex]);
-            const cv = yield editor_shims_1.coreSchema.findConfigVar(schema, path[pathIndex], this.document.yaml);
+            // findConfigVar uses local document context for MQTT filtering
+            const cv = yield this.document.findConfigVar(schema, path[pathIndex]);
             if (cv === undefined)
                 return [];
             let innerNode = pathElement !== null
@@ -40791,7 +41252,7 @@ class CompletionsHandler {
             // navigate into the prop
             // this can be an action or a prop of this trigger
             if (cv.schema !== undefined) {
-                const innerProp = yield editor_shims_1.coreSchema.findConfigVar(cv.schema, path[pathIndex], this.document.yaml);
+                const innerProp = yield this.document.findConfigVar(cv.schema, path[pathIndex]);
                 if (innerProp !== undefined) {
                     return this.resolveSchema(path, pathIndex, cv.schema, (0, yaml_1.isMap)(pathNode) ? pathNode : null, node);
                 }
@@ -40810,7 +41271,7 @@ class CompletionsHandler {
                     if ((0, yaml_1.isScalar)(node)) {
                         const complete = yield editor_shims_1.coreSchema.getConfigVarComplete2(action);
                         if (complete.type === "schema" && complete["maybe"] !== undefined) {
-                            const maybe_cv = yield editor_shims_1.coreSchema.findConfigVar(action.schema, complete["maybe"], this.document.yaml);
+                            const maybe_cv = yield this.document.findConfigVar(action.schema, complete["maybe"]);
                             if (!maybe_cv) {
                                 return [];
                             }
@@ -40840,7 +41301,8 @@ class CompletionsHandler {
                 prefix = "- ";
             const result = [];
             try {
-                for (var _d = true, _e = __asyncValues(yield editor_shims_1.coreSchema.getRegistry(configVar.registry, this.document.yaml)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                // getRegistry on the document is scope-aware (merged: all files)
+                for (var _d = true, _e = __asyncValues(this.document.getRegistry(configVar.registry)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
                     _c = _f.value;
                     _d = false;
                     const [value, props] = _c;
@@ -40884,7 +41346,7 @@ class CompletionsHandler {
         let offsetDiff = yaml.contents.range[2];
         let maxOffset = yaml.contents.range[0];
         let closestNode = this.document.yaml.contents;
-        (0, yaml_1.visit)(yaml, (key, node) => {
+        (0, yaml_1.visit)(yaml, (_key, node) => {
             if (!node || !(0, yaml_1.isNode)(node)) {
                 return;
             }
@@ -40961,7 +41423,7 @@ exports.CompletionsHandler = CompletionsHandler;
 
 
 /***/ }),
-/* 302 */
+/* 303 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -40985,6 +41447,7 @@ class DefinitionHandler {
     }
     getDefinition(uri, position) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
             try {
                 const document = this.documents.getDocument(uri);
                 const lineContent = document.text.getLineContent(position.line);
@@ -40996,6 +41459,32 @@ class DefinitionHandler {
                 if (!node)
                     return;
                 var path = document.getPath(node);
+                // Navigate to !include file target
+                let includeFile;
+                const parentNode = document.getParent(node);
+                const isKeyNode = (0, yaml_1.isPair)(parentNode) && parentNode.key === node;
+                if (!isKeyNode &&
+                    (0, yaml_1.isScalar)(node) &&
+                    typeof node.value === "string" &&
+                    (node.tag === "!include" ||
+                        (path.length > 2 && path[0] === "packages" && path[2] === "file"))) {
+                    includeFile = node.value;
+                }
+                else if ((0, yaml_1.isMap)(node) && node.tag === "!include") {
+                    const fileVal = node.get("file");
+                    if (typeof fileVal === "string")
+                        includeFile = fileVal;
+                }
+                if (includeFile) {
+                    const targetUri = new URL(includeFile, uri).toString();
+                    return {
+                        uri: targetUri,
+                        range: {
+                            start: { line: 0, character: 0 },
+                            end: { line: 0, character: 0 },
+                        },
+                    };
+                }
                 if (path.length === 1) {
                     return null;
                 }
@@ -41006,23 +41495,24 @@ class DefinitionHandler {
                 const [cv, pathNode] = cvAndPath;
                 let fullCv = yield editor_shims_1.coreSchema.getConfigVarComplete2(cv);
                 if (fullCv.type === "schema" && fullCv.maybe !== undefined) {
-                    fullCv = yield editor_shims_1.coreSchema.getConfigVarComplete2(fullCv);
+                    fullCv = yield editor_shims_1.coreSchema.getConfigVarComplete(fullCv.schema, fullCv.maybe);
                 }
                 if (fullCv.type === "use_id" && (0, yaml_1.isScalar)(pathNode)) {
                     const typeId = fullCv.use_id_type;
                     const targetId = pathNode.value;
-                    const range = yield editor_shims_1.coreSchema.findComponentDefinition(typeId, targetId, document.yaml);
-                    if (!range) {
+                    // Use document method for merged-scope ID search (includes all files)
+                    const result = yield document.findComponentDefinition(typeId, targetId);
+                    if (!result) {
                         return null;
                     }
-                    const definition = {
-                        uri: uri,
+                    const { doc: defDoc, range } = result;
+                    return {
+                        uri: (_a = defDoc.fileUri) !== null && _a !== void 0 ? _a : uri,
                         range: {
-                            start: document.text.getPosition(range[0]),
-                            end: document.text.getPosition(range[0] + targetId.length),
+                            start: defDoc.text.getPosition(range[0]),
+                            end: defDoc.text.getPosition(range[0] + targetId.length),
                         },
                     };
-                    return definition;
                 }
             }
             catch (error) {
@@ -41033,6 +41523,360 @@ class DefinitionHandler {
     }
 }
 exports.DefinitionHandler = DefinitionHandler;
+
+
+/***/ }),
+/* 304 */
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DocumentSymbolHandler = void 0;
+const vscode_languageserver_types_1 = __webpack_require__(30);
+const yaml_1 = __webpack_require__(115);
+/**
+ * Handles the extraction and parsing of {@linkcode DocumentSymbol}s from {@linkcode ESPHomeDocument}s
+ * such that they can be used for ***navigation***, ***outline view*** and ***symbol search***. Parses the
+ * hierarchical yaml content and converts it into LSP-compliant {@linkcode DocumentSymbol}s.
+ */
+class DocumentSymbolHandler {
+    constructor(documents) {
+        this.documents = documents;
+        // SYMBOLS MAP
+        // -----------
+        /**
+         * Maps ESPHome configuration keys to their corresponding symbol kinds for document symbol representation.
+         *
+         * This map categorizes various ESPHome YAML configuration options by logical type:
+         * - **Classes**: Core components like esphome, esp32, esp8266, logger, ota, and time
+         * - **Interfaces**: Communication protocols and services (wifi, api, web_server, mqtt, ethernet, captive_portal, i2c, spi)
+         * - **Constants**: Connection parameters (ssid, password, port, host)
+         * - **Functions**: Executable blocks (action, lambda)
+         * - **Events**: Triggered actions (script, update_interval)
+         * - **Classes**: Hardware interfaces (sensor, switch, light, binary_sensor, fan, display)
+         * - **Fields**: Common attributes (id, name, pin)
+         * - etc.
+         */
+        this.keyToSymbolMap = new Map([
+            // Core components
+            ...['esphome', 'esp32', 'esp8266',
+                'logger', 'ota', 'time',
+                'sensor', 'switch', 'light', 'binary_sensor', 'fan', 'display']
+                .map(k => [k, vscode_languageserver_types_1.SymbolKind.Class]),
+            // Communication protocols
+            ...['wifi', 'api', 'web_server', 'mqtt', 'ethernet', 'captive_portal',
+                'i2c', 'spi', 'pin']
+                .map(k => [k, vscode_languageserver_types_1.SymbolKind.Interface]),
+            // Constants
+            ...['ssid', 'password', 'port', 'host']
+                .map(k => [k, vscode_languageserver_types_1.SymbolKind.Constant]),
+            // Functions
+            ...['action', 'lambda']
+                .map(k => [k, vscode_languageserver_types_1.SymbolKind.Function]),
+            // Events
+            ...['script', 'update_interval']
+                .map(k => [k, vscode_languageserver_types_1.SymbolKind.Event]),
+            // Enums
+            ['board', vscode_languageserver_types_1.SymbolKind.Enum],
+            // Enum members
+            ...['type', 'platform']
+                .map(k => [k, vscode_languageserver_types_1.SymbolKind.EnumMember]),
+            // Fields
+            ...['id', 'name']
+                .map(k => [k, vscode_languageserver_types_1.SymbolKind.Field]),
+            // Others
+            ['substitutions', vscode_languageserver_types_1.SymbolKind.Namespace],
+            ['packages', vscode_languageserver_types_1.SymbolKind.Package],
+            ['widgets', vscode_languageserver_types_1.SymbolKind.Struct],
+            ['font', vscode_languageserver_types_1.SymbolKind.TypeParameter],
+        ]);
+    }
+    /**
+     * Retrieves {@link DocumentSymbol document symbols} for the given document URI
+     *
+     * Parses and extracts all symbols (such as sections, keys, and their hierarchical relationships)
+     * that can be displayed in the ***document outline*** or ***symbol navigator***.
+     *
+     * @param uri - The document URI to extract symbols from
+     * @returns An array of {@linkcode DocumentSymbol} objects
+     *          representing the structure of the document.
+     *          Returns an empty array if the document is _not found_, has _no yaml content_,
+     *          or if an _error occurs during parsing_.
+     */
+    getDocumentSymbols(uri) {
+        try {
+            const doc = this.documents.getDocument(uri);
+            if (!doc || !doc.yaml || !doc.yaml.contents) {
+                return [];
+            }
+            return this.parseNode(doc, doc.yaml.contents);
+        }
+        catch (error) {
+            console.error(`Failed to get document symbols for ${uri}:`, error);
+        }
+        return [];
+    }
+    /**
+     * Delegates the parsing logic to the appropriate function based on the node's type (`Map` or `Sequence`)
+     * @param doc - The {@linkcode ESPHomeDocument} being processed
+     * @param node - The yaml node to parse
+     * @returns An array of {@linkcode DocumentSymbol} extracted from the node
+     */
+    parseNode(doc, node) {
+        const symbols = [];
+        if ((0, yaml_1.isMap)(node)) {
+            for (const item of node.items) {
+                const symbol = this.createSymbol(doc, item);
+                if (symbol) {
+                    symbols.push(symbol);
+                }
+            }
+        }
+        else if ((0, yaml_1.isSeq)(node)) {
+            for (let index = 0; index < node.items.length; index++) {
+                const symbol = this.createSequenceSymbol(doc, node, index);
+                if (symbol) {
+                    symbols.push(symbol);
+                }
+            }
+        }
+        return symbols;
+    }
+    /**
+     * Creates a document symbol from a yaml key-value pair.
+     * @param doc - The {@linkcode ESPHomeDocument} to determine the {@linkcode Range}
+     * @param pair - The yaml key-value {@linkcode Pair} to parse into a {@linkcode DocumentSymbol}
+     * @returns A {@linkcode DocumentSymbol} object representing the pair, or `null` if the pair key is not a scalar value
+     */
+    createSymbol(doc, pair) {
+        if (!(0, yaml_1.isScalar)(pair.key)) {
+            return null;
+        }
+        const keyNode = pair.key;
+        const valueNode = pair.value;
+        if (!keyNode || !valueNode) {
+            return null;
+        }
+        const name = pair.key.value;
+        let kind = this.getSymbolKind(name, valueNode);
+        let detail = "";
+        let children = [];
+        const keyRange = this.getRange(doc, keyNode);
+        let fullRange = keyRange; // Default to keyRange, but expand to include value if possible
+        if (valueNode.range) {
+            fullRange = {
+                start: keyRange.start,
+                end: doc.text.getPosition(valueNode.range[1])
+            };
+        }
+        if ((0, yaml_1.isScalar)(valueNode)) {
+            detail = String(valueNode.value);
+        }
+        else {
+            children = this.parseNode(doc, valueNode);
+        }
+        return vscode_languageserver_types_1.DocumentSymbol.create(name, detail, kind, fullRange, keyRange, children);
+    }
+    /**
+     * Creates a {@link DocumentSymbol document symbol} for an item within a {@link YAMLSeq YAML sequence}.
+     * @param doc - The {@linkcode ESPHomeDocument} being processed
+     * @param node - The {@link YAMLSeq YAML sequence} node containing the item
+     * @param index - The index of the item within the sequence
+     * @returns A {@linkcode DocumentSymbol} representing the sequence item, or `null` if the item doesn't exist
+     */
+    createSequenceSymbol(doc, node, index) {
+        var _a;
+        const item = node.items[index];
+        if (!item) {
+            return null;
+        }
+        let name = (_a = this.getIdentifier(item)) !== null && _a !== void 0 ? _a : `[${index}]`;
+        let kind = this.getSymbolKind(name, item);
+        const range = this.getRange(doc, item);
+        let selectionRange = range;
+        const detail = "";
+        const children = this.parseNode(doc, item); // Recursively parse children, if any
+        return vscode_languageserver_types_1.DocumentSymbol.create(name, detail, kind, range, selectionRange, children);
+    }
+    // HELPER FUNCTIONS
+    // ----------------
+    /**
+     * Converts a yaml node's {@linkcode YamlRange Range} to a LSP {@linkcode Range} object.
+     * @param doc - The {@linkcode ESPHomeDocument} containing {@linkcode Position} information.
+     * @param node - The yaml {@linkcode Node} in question
+     * @returns A {@linkcode Range} object with {@linkcode Range.start start} and {@linkcode Range.end end} positions.
+     *          Returns a zero-length range at the beginning of the document if the node has no range information.
+     */
+    getRange(doc, node) {
+        if (!node.range) {
+            return {
+                start: { line: 0, character: 0 },
+                end: { line: 0, character: 0 }
+            };
+        }
+        return {
+            start: doc.text.getPosition(node.range[0]),
+            end: doc.text.getPosition(node.range[1])
+        };
+    }
+    /**
+     * Extracts an identifier from a YAML node
+     *
+     * - For scalar nodes, returns the string value of the node as is.
+     * - For map nodes, searches for a pair with key `id`, `name`, or `platform`.
+     *   Returns the value of the **first** matching key it encounters in the YAML map order.
+     *
+     * @param node - The YAML node to extract an identifier from
+     * @returns The identifier as a string, or undefined if no identifier could be extracted
+     */
+    getIdentifier(node) {
+        if ((0, yaml_1.isScalar)(node)) {
+            return String(node.value);
+        }
+        else if ((0, yaml_1.isMap)(node)) {
+            const idPair = node.items.find(item => (0, yaml_1.isScalar)(item.key) && ['id', 'name', 'platform'].includes(item.key.value));
+            if (idPair && (0, yaml_1.isScalar)(idPair.value)) {
+                return String(idPair.value.value);
+            }
+        }
+    }
+    /**
+     * Determines the appropriate {@linkcode SymbolKind} for a given node based on its name and structure.
+     * @param name - The name of the symbol
+     * @param node - The YAML node to analyze
+     * @returns The determined {@linkcode SymbolKind} for the given node
+     */
+    getSymbolKind(name, node) {
+        // If the name starts with "on_", consider it an `Event`
+        if (name.startsWith("on_")) {
+            return vscode_languageserver_types_1.SymbolKind.Event;
+        }
+        // Lookup special key-names in the map
+        if (this.keyToSymbolMap.has(name)) {
+            return this.keyToSymbolMap.get(name);
+        }
+        // If not special, fallback to the node's value's type
+        if ((0, yaml_1.isMap)(node)) {
+            return vscode_languageserver_types_1.SymbolKind.Object;
+        }
+        else if ((0, yaml_1.isSeq)(node)) {
+            return vscode_languageserver_types_1.SymbolKind.Array;
+        }
+        else if ((0, yaml_1.isScalar)(node)) {
+            switch (typeof node.value) {
+                case 'string':
+                    return vscode_languageserver_types_1.SymbolKind.String;
+                case 'number':
+                    return vscode_languageserver_types_1.SymbolKind.Number;
+                case 'boolean':
+                    return vscode_languageserver_types_1.SymbolKind.Boolean;
+                default:
+                    return vscode_languageserver_types_1.SymbolKind.Variable;
+            }
+        }
+        // Default fallback
+        return vscode_languageserver_types_1.SymbolKind.Field;
+    }
+}
+exports.DocumentSymbolHandler = DocumentSymbolHandler;
+
+
+/***/ }),
+/* 305 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ReferencesHandler = void 0;
+const yaml_1 = __webpack_require__(115);
+class ReferencesHandler {
+    constructor(documents) {
+        this.documents = documents;
+    }
+    getReferences(uri, position) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            try {
+                const document = this.documents.getDocument(uri);
+                const lineContent = document.text.getLineContent(position.line);
+                if (lineContent.trim().length === 0) {
+                    return;
+                }
+                const offset = document.text.offsetAt(position);
+                const node = document.getNodeFromOffset(offset);
+                if (!node)
+                    return;
+                const path = document.getPath(node);
+                if (path.length === 1) {
+                    return null;
+                }
+                const cvAndPath = yield document.getConfigVarAndPathNode(path);
+                if (cvAndPath === undefined) {
+                    return;
+                }
+                const [cv, pathNode] = cvAndPath;
+                const idCv = cv;
+                if (idCv.id_type && (0, yaml_1.isScalar)(pathNode)) {
+                    const idTypeClass = idCv.id_type.class;
+                    const idTypeParents = (_a = idCv.id_type.parents) !== null && _a !== void 0 ? _a : [];
+                    const targetId = pathNode.value;
+                    // Collect all scalar nodes whose value matches the target id
+                    const candidates = [];
+                    (0, yaml_1.visit)(document.yaml, (_, visitNode) => {
+                        if ((0, yaml_1.isScalar)(visitNode) && visitNode.value === targetId) {
+                            candidates.push(visitNode);
+                        }
+                    });
+                    const results = [];
+                    for (const candidate of candidates) {
+                        const candidatePath = document.getPath(candidate);
+                        if (candidatePath.length < 2)
+                            continue;
+                        try {
+                            const result = yield document.getConfigVarAndPathNode(candidatePath);
+                            if (!result)
+                                continue;
+                            const [candidateCv] = result;
+                            if (candidateCv.type === "use_id" &&
+                                (candidateCv.use_id_type === idTypeClass ||
+                                    idTypeParents.includes(candidateCv.use_id_type))) {
+                                if (candidate.range) {
+                                    results.push({
+                                        uri,
+                                        range: {
+                                            start: document.text.getPosition(candidate.range[0]),
+                                            end: document.text.getPosition(candidate.range[0] + targetId.length),
+                                        },
+                                    });
+                                }
+                            }
+                        }
+                        catch (_b) {
+                            // skip nodes whose path can't be resolved
+                        }
+                    }
+                    return results;
+                }
+            }
+            catch (error) {
+                console.log("References:" + error);
+            }
+            return null;
+        });
+    }
+}
+exports.ReferencesHandler = ReferencesHandler;
 
 
 /***/ })

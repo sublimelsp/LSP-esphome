@@ -75,16 +75,18 @@ class ESPHomeLocalConnection extends connection_1.ESPHomeConnection {
             });
             if (this.process.stdout !== null) {
                 this.process.stdout.on("data", (data) => {
-                    try {
-                        if (data.length < 2) {
-                            console.log(`Unexpected data too small: ${data}'`);
-                            return;
+                    const lines = data.toString().split("\n");
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (trimmed.length < 2)
+                            continue;
+                        try {
+                            const msg = JSON.parse(trimmed);
+                            this.handleMessage(msg);
                         }
-                        const msg = JSON.parse(data);
-                        this.handleMessage(msg);
-                    }
-                    catch (e) {
-                        console.log(`Error handling response: data: ${typeof data}: '${data === null || data === void 0 ? void 0 : data.toString()}' ${e}`);
+                        catch (e) {
+                            console.log(`Error handling response: data: ${typeof data}: '${trimmed}' ${e}`);
+                        }
                     }
                 });
             }

@@ -1,5 +1,4 @@
-import { Document, Node, YAMLMap } from "yaml";
-import { Range } from "yaml/dist/nodes/Node";
+import { YAMLMap } from "yaml";
 export interface SchemaSet {
     [name: string]: Component;
     core: CoreComponent;
@@ -75,11 +74,11 @@ export interface Schema {
     config_vars: ConfigVars;
     extends: string[];
 }
-interface Registry {
+export interface Registry {
     [name: string]: ConfigVar;
 }
-type ComponentRegistry = "action" | "condition" | "filter" | "effects";
-interface Component {
+export type ComponentRegistry = "action" | "condition" | "filter" | "effects";
+export interface Component {
     schemas: {
         [name: string]: ConfigVar;
         CONFIG_SCHEMA: ConfigVarSchema;
@@ -94,6 +93,12 @@ interface Component {
     filter: Registry;
     effects: Registry;
     pin?: ConfigVar;
+    /**
+     * Set when this component is loaded as a platform-specific entry
+     * (e.g. template loaded as sensor platform → platform = "sensor").
+     * Used to build the correct action name: sensor.template.publish.
+     */
+    platform?: string;
 }
 interface CoreComponent extends Component {
     platforms: {
@@ -131,20 +136,23 @@ export declare class ESPHomeSchema {
     getComponentPlatformSchema(domain: string, platform: string): Promise<ConfigVar>;
     getExtendedConfigVar(name: string): Promise<ConfigVar>;
     isPlatform(name: string): Promise<boolean>;
-    getDocComponents(doc: Document): AsyncGenerator<[string, Component, Node?]>;
-    getRegistry(registry: ComponentRegistry, doc: Document): AsyncGenerator<[string, ConfigVar]>;
+    /**
+     * Iterate config vars for a schema. Accepts an optional YAMLMap from the
+     * current document to enable context-aware filtering (e.g. MQTT props).
+     */
+    iterConfigVars(schema: Schema, docMap?: YAMLMap, yielded?: string[]): AsyncGenerator<[string, ConfigVar]>;
+    findConfigVar(schema: Schema, prop: string, docMap?: YAMLMap): Promise<ConfigVar | undefined>;
+    getConfigVarComplete(schema: Schema, key: string): Promise<ConfigVar>;
+    getConfigVarComplete2(cv: ConfigVar): Promise<ConfigVar>;
+    /**
+     * Iterate a domain-specific registry (registry must contain ".").
+     * E.g. "sensor.filter" yields all sensor filters.
+     */
+    getDomainRegistry(domainRegistry: string): AsyncGenerator<[string, ConfigVar]>;
     getRegistryConfigVar(registry: string, entry: string): Promise<ConfigVar | undefined>;
     isRegistry(name: string): name is ComponentRegistry;
     getActionConfigVar(entry: string): Promise<ConfigVarTrigger>;
     getPinConfigVar(component: string): Promise<ConfigVar>;
     getPins(): Promise<string[]>;
-    getConfigVarComplete(schema: Schema, key: string): Promise<ConfigVar>;
-    getConfigVarComplete2(cv: ConfigVar): Promise<ConfigVar>;
-    iterConfigVars(schema: Schema, doc: Document, yielded?: string[]): AsyncGenerator<[string, ConfigVar]>;
-    findConfigVar(schema: Schema, prop: string, doc: Document): Promise<ConfigVar | undefined>;
-    iterDeclaringIdsInner(idType: string, map: YAMLMap, declaringCv: ConfigVar, doc: Document): AsyncGenerator<Node>;
-    iterDeclaringIds(idType: string, doc: Document): AsyncGenerator<Node>;
-    findComponentDefinition(id_type: string, id: string, doc: Document): Promise<Range | null | undefined>;
-    getUsableIds(use_id_type: string, doc: Document): Promise<string[]>;
 }
 export {};

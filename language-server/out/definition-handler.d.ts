@@ -6,8 +6,14 @@ export declare class DefinitionHandler {
     getDefinition(uri: string, position: Position): Promise<{
         uri: string;
         range: {
-            start: Position;
-            end: Position;
+            start: {
+                line: number;
+                character: number;
+            };
+            end: {
+                line: number;
+                character: number;
+            };
         };
     } | null | undefined>;
 }
