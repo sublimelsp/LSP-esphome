@@ -29,10 +29,10 @@ popd || exit
 pushd "${REPO_DIR}" || exit
 
 echo 'Enter commit SHA, branch or tag (for example 2.1.0) to build'
-read -rp 'SHA, branch or tag (default: main): ' ref
+read -rp 'SHA, branch or tag (default: dev): ' ref
 
 if [ "${ref}" = "" ]; then
-    ref="main"
+    ref="dev"
 fi
 
 echo "Cloning ${GITHUB_REPO_URL}"
