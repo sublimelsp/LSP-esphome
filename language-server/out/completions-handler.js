@@ -135,7 +135,7 @@ class CompletionsHandler {
             }
         });
     }
-    getPlatformNames(platform_name, range) {
+    getPlatformNames(platform_name, _range) {
         return __awaiter(this, void 0, void 0, function* () {
             const c = yield editor_shims_1.coreSchema.getComponent(platform_name);
             if (c.components === undefined) {
@@ -155,7 +155,8 @@ class CompletionsHandler {
             const platformList = yield editor_shims_1.coreSchema.getPlatformList();
             const result = [];
             for (var platformName in platformList) {
-                // Don't add duplicate keys
+                // Don't add duplicate keys — check local file only (YAML doesn't allow
+                // duplicate keys in the same file, but includes can have them via ESPHome merge)
                 if (this.docMap && this.mapHasScalarKey(this.docMap, platformName)) {
                     continue;
                 }
@@ -168,7 +169,7 @@ class CompletionsHandler {
                 if (componentName in platformList) {
                     continue;
                 }
-                // Don't add duplicate keys
+                // Don't add duplicate keys — check local file only
                 if (this.docMap && this.mapHasScalarKey(this.docMap, componentName)) {
                     continue;
                 }
@@ -198,18 +199,6 @@ class CompletionsHandler {
         }
         if (this.docMap.get("esp32", true) !== undefined) {
             return "esp32";
-        }
-        const esphome = this.docMap.get("esphome");
-        if ((0, yaml_1.isMap)(esphome)) {
-            const chipset = esphome.get("platform");
-            if ((0, objects_1.isString)(chipset)) {
-                if (chipset.toLowerCase() === "esp32") {
-                    return "esp32";
-                }
-                if (chipset.toLowerCase() === "esp8266") {
-                    return "esp8266";
-                }
-            }
         }
         return undefined;
     }
@@ -241,7 +230,7 @@ class CompletionsHandler {
                         if ((0, yaml_1.isScalar)(cursorNode)) {
                             const complete = yield editor_shims_1.coreSchema.getConfigVarComplete2(cv);
                             if (complete["maybe"] !== undefined) {
-                                const maybe_cv = yield editor_shims_1.coreSchema.findConfigVar(cv.schema, complete["maybe"], this.document.yaml);
+                                const maybe_cv = yield this.document.findConfigVar(cv.schema, complete["maybe"]);
                                 return this.resolveConfigVar(path, pathIndex, maybe_cv, null, cursorNode);
                             }
                         }
@@ -308,10 +297,6 @@ class CompletionsHandler {
                 return [];
             }
             else if (cv.type === "pin") {
-                //if (parentElement.items.length > 0 && isScalar(node) && node === parentElement.items[0].value) {
-                // cursor is in the value of the pair
-                //    return this.resolvePinNumbers(result, cv);
-                //}
                 if (!cv.schema) {
                     // This pin does not accept schema, e.g. i2c
                     return [];
@@ -371,8 +356,9 @@ class CompletionsHandler {
                 return result;
             }
             else if (cv.type === "use_id") {
+                // use_id completions need the merged (whole-document) scope
                 let result = [];
-                const usableIds = yield editor_shims_1.coreSchema.getUsableIds(cv.use_id_type, this.document.yaml);
+                const usableIds = yield this.document.getUsableIds(cv.use_id_type);
                 for (var usableId of usableIds) {
                     result.push((0, editor_shims_1.createCompletion)(usableId, usableId, editor_shims_1.CompletionItemKind.Variable));
                 }
@@ -416,7 +402,8 @@ class CompletionsHandler {
                     prefix = "- ";
             }
             try {
-                for (var _d = true, _e = __asyncValues(editor_shims_1.coreSchema.iterConfigVars(schema, this.document.yaml)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                // iterConfigVars is document-aware (MQTT filtering uses local YAML)
+                for (var _d = true, _e = __asyncValues(this.document.iterConfigVars(schema)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
                     _c = _f.value;
                     _d = false;
                     const [prop, config] = _c;
@@ -506,7 +493,8 @@ class CompletionsHandler {
     resolveSchema(path, pathIndex, schema, pathElement, node) {
         return __awaiter(this, void 0, void 0, function* () {
             console.log("component: " + path[pathIndex]);
-            const cv = yield editor_shims_1.coreSchema.findConfigVar(schema, path[pathIndex], this.document.yaml);
+            // findConfigVar uses local document context for MQTT filtering
+            const cv = yield this.document.findConfigVar(schema, path[pathIndex]);
             if (cv === undefined)
                 return [];
             let innerNode = pathElement !== null
@@ -590,7 +578,7 @@ class CompletionsHandler {
             // navigate into the prop
             // this can be an action or a prop of this trigger
             if (cv.schema !== undefined) {
-                const innerProp = yield editor_shims_1.coreSchema.findConfigVar(cv.schema, path[pathIndex], this.document.yaml);
+                const innerProp = yield this.document.findConfigVar(cv.schema, path[pathIndex]);
                 if (innerProp !== undefined) {
                     return this.resolveSchema(path, pathIndex, cv.schema, (0, yaml_1.isMap)(pathNode) ? pathNode : null, node);
                 }
@@ -609,7 +597,7 @@ class CompletionsHandler {
                     if ((0, yaml_1.isScalar)(node)) {
                         const complete = yield editor_shims_1.coreSchema.getConfigVarComplete2(action);
                         if (complete.type === "schema" && complete["maybe"] !== undefined) {
-                            const maybe_cv = yield editor_shims_1.coreSchema.findConfigVar(action.schema, complete["maybe"], this.document.yaml);
+                            const maybe_cv = yield this.document.findConfigVar(action.schema, complete["maybe"]);
                             if (!maybe_cv) {
                                 return [];
                             }
@@ -639,7 +627,8 @@ class CompletionsHandler {
                 prefix = "- ";
             const result = [];
             try {
-                for (var _d = true, _e = __asyncValues(yield editor_shims_1.coreSchema.getRegistry(configVar.registry, this.document.yaml)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                // getRegistry on the document is scope-aware (merged: all files)
+                for (var _d = true, _e = __asyncValues(this.document.getRegistry(configVar.registry)), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
                     _c = _f.value;
                     _d = false;
                     const [value, props] = _c;
@@ -683,7 +672,7 @@ class CompletionsHandler {
         let offsetDiff = yaml.contents.range[2];
         let maxOffset = yaml.contents.range[0];
         let closestNode = this.document.yaml.contents;
-        (0, yaml_1.visit)(yaml, (key, node) => {
+        (0, yaml_1.visit)(yaml, (_key, node) => {
             if (!node || !(0, yaml_1.isNode)(node)) {
                 return;
             }
