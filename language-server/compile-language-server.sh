@@ -73,6 +73,9 @@ pushd "${SRC_SERVER_DIR}" || exit
 
 echo 'Copying and cleaning up files...'
 cp -r out package.json "${REPO_DIR}"
+
+popd || exit
+
 rm -rf "${CLONED_REPO_DIR}"
 
 # ---------------- #
