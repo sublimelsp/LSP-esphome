@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sublimelsp/lsp_smoke_test/v1/smoke.schema.json
+file: device.yaml
+# ESPHome files are plain .yaml files, so the syntax from the ESPHome package has to be assigned explicitly.
+syntax: source.yaml.esphome
+# The server's diagnostics have no source or code, only a message.
+expected_diagnostics:
+  message: cannot parse not-a-number as an integer

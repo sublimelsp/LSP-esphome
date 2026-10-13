@@ -1,0 +1,15 @@
+name: Smoke test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    uses: sublimelsp/lsp_smoke_test/.github/workflows/smoke-test.yml@main
+    with:
+      # Provides the YAML (esphome) syntax that the server is enabled for.
+      extra-packages: SublimeText/ESPHome@4143-

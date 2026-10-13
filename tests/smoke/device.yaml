@@ -1,0 +1,8 @@
+esphome:
+  name: smoke
+
+esp32:
+  board: esp32dev
+
+logger:
+  baud_rate: not-a-number
