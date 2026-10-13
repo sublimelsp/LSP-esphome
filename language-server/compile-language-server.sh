@@ -37,7 +37,7 @@ fi
 
 echo "Cloning ${GITHUB_REPO_URL}"
 git clone ${GITHUB_REPO_URL} --branch ${ref} --single-branch "${CLONED_REPO_DIR}" || echo "Repo already cloned. Continuing..."
-current_sha=$( git rev-parse HEAD )
+current_sha=$( git -C "${CLONED_REPO_DIR}" rev-parse HEAD )
 printf "ref: %s\n%s\n" "$ref" "$current_sha" > update-info.log
 
 popd || exit
