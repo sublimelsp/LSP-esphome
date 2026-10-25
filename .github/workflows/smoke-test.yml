@@ -12,4 +12,4 @@ jobs:
     uses: sublimelsp/lsp_smoke_test/.github/workflows/smoke-test.yml@v1
     with:
       # Provides the YAML (esphome) syntax that the server is enabled for.
-      extra-packages: SublimeText/ESPHome@4143-
+      extra-packages: ESPHome
